@@ -17,29 +17,40 @@ async fn main() -> anyhow::Result<()> {
 
         tokio::spawn(async move {
             let mut socket = std::pin::pin!(BufReader::new(socket));
-            let token_result = parser::parse_token(&mut socket).await;
-            match token_result {
-                Ok(value) => match value {
-                    RedisValue::Array(items) => {
-                        for item in items {
-                            match item {
-                                RedisValue::String(command) => {
-                                    match command.to_lowercase().as_str() {
-                                        "ping" => {
-                                            let reply =
-                                                serialize(RedisValue::String("PONG".to_string()));
-                                            socket.write_all(reply.as_bytes()).await;
+            loop {
+                let token_result = parser::parse_token(&mut socket).await;
+                println!("parsed: {token_result:?}");
+
+                match token_result {
+                    Ok(RedisValue::None) => {
+                        break;
+                    }
+                    Ok(value) => match value {
+                        RedisValue::Array(items) => {
+                            for item in items {
+                                match item {
+                                    RedisValue::String(command) => {
+                                        match command.to_lowercase().as_str() {
+                                            "ping" => {
+                                                let reply = serialize(RedisValue::String(
+                                                    "PONG".to_string(),
+                                                ));
+                                                socket.write_all(reply.as_bytes()).await;
+                                            }
+                                            _ => todo!(),
                                         }
-                                        _ => todo!(),
                                     }
+                                    _ => todo!("unsupported command"),
                                 }
-                                _ => todo!("unsupported command"),
                             }
                         }
+                        _ => todo!("only array replies supported now"),
+                    },
+                    Err(err) => {
+                        eprintln!("Cannot parse token: {:?}", err);
+                        break;
                     }
-                    _ => todo!("only array replies supported now"),
-                },
-                Err(err) => eprintln!("Cannot parse token: {:?}", err),
+                }
             }
         });
     }

@@ -10,6 +10,7 @@ const SEPARATOR_STRING: &str = "\r\n";
 pub enum RedisValue {
     String(String),
     Array(Vec<RedisValue>),
+    None,
 }
 
 async fn read_n<R: AsyncBufRead>(reader: &mut Pin<&mut R>, n: usize) -> anyhow::Result<Vec<u8>> {
@@ -40,7 +41,9 @@ async fn next_part<R: AsyncBufRead>(reader: &mut Pin<&mut R>) -> anyhow::Result<
 }
 
 pub async fn parse_token<R: AsyncBufRead>(reader: &mut Pin<&mut R>) -> anyhow::Result<RedisValue> {
-    let start_letter = next_char(reader).await?;
+    let Ok(start_letter) = next_char(reader).await else {
+        return Ok(RedisValue::None);
+    };
 
     match start_letter {
         b'$' => {
@@ -81,5 +84,6 @@ pub fn serialize(value: RedisValue) -> String {
                 .join("");
             format!("*{length}{SEPARATOR_STRING}{content}{SEPARATOR_STRING}")
         }
+        RedisValue::None => "".to_string(),
     }
 }
