@@ -23,14 +23,16 @@ async fn main() -> anyhow::Result<()> {
                     RedisValue::Array(items) => {
                         for item in items {
                             match item {
-                                RedisValue::String(command) => match &command.as_str() {
-                                    &"ping" => {
-                                        let reply =
-                                            serialize(RedisValue::String("PONG".to_string()));
-                                        socket.write_all(reply.as_bytes()).await;
+                                RedisValue::String(command) => {
+                                    match command.to_lowercase().as_str() {
+                                        "ping" => {
+                                            let reply =
+                                                serialize(RedisValue::String("PONG".to_string()));
+                                            socket.write_all(reply.as_bytes()).await;
+                                        }
+                                        _ => todo!(),
                                     }
-                                    _ => todo!(),
-                                },
+                                }
                                 _ => todo!("unsupported command"),
                             }
                         }
