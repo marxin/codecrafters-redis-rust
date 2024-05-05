@@ -35,6 +35,7 @@ async fn main() -> anyhow::Result<()> {
                 if response.is_err() {
                     eprintln!("failed to make a response: {:?}", response.err());
                 } else {
+                    println!("Sending reply: {response:?}");
                     // TODO
                     let written = socket
                         .write_all(response.unwrap().serialize().as_bytes())

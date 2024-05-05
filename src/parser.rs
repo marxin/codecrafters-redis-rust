@@ -85,7 +85,7 @@ impl RedisValue {
                     .join("");
                 format!("*{length}{SEPARATOR_STRING}{content}{SEPARATOR_STRING}")
             }
-            RedisValue::None => format!("-1{SEPARATOR_STRING}"),
+            RedisValue::None => format!("$-1{SEPARATOR_STRING}"),
         }
     }
 }
