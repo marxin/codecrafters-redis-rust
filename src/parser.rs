@@ -67,23 +67,25 @@ pub async fn parse_token<R: AsyncBufRead>(reader: &mut Pin<&mut R>) -> anyhow::R
     }
 }
 
-pub fn serialize(value: RedisValue) -> String {
-    match value {
-        RedisValue::String(value) => {
-            format!(
-                "${}{SEPARATOR_STRING}{value}{SEPARATOR_STRING}",
-                value.len()
-            )
+impl RedisValue {
+    pub fn serialize(&self) -> String {
+        match self {
+            RedisValue::String(value) => {
+                format!(
+                    "${}{SEPARATOR_STRING}{value}{SEPARATOR_STRING}",
+                    value.len()
+                )
+            }
+            RedisValue::Array(array) => {
+                let length = array.len();
+                let content = array
+                    .iter()
+                    .map(|v| v.serialize())
+                    .collect::<Vec<_>>()
+                    .join("");
+                format!("*{length}{SEPARATOR_STRING}{content}{SEPARATOR_STRING}")
+            }
+            RedisValue::None => "".to_string(),
         }
-        RedisValue::Array(array) => {
-            let length = array.len();
-            let content = array
-                .into_iter()
-                .map(serialize)
-                .collect::<Vec<_>>()
-                .join("");
-            format!("*{length}{SEPARATOR_STRING}{content}{SEPARATOR_STRING}")
-        }
-        RedisValue::None => "".to_string(),
     }
 }
