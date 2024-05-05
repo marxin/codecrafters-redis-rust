@@ -49,7 +49,7 @@ impl RedisServer {
                     anyhow::bail!("SET argument value must be string: {value:?}");
                 };
                 self.db.insert(key.to_owned(), value.to_owned());
-                Ok(RedisValue::String("Ok".to_string()))
+                Ok(RedisValue::String("OK".to_string()))
             }
             "get" => {
                 anyhow::ensure!(
