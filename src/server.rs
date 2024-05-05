@@ -1,9 +1,11 @@
 use std::collections::HashMap;
+use std::ops::Add;
+use std::time::{Duration, Instant};
 
 use crate::parser::RedisValue;
 
 pub struct RedisServer {
-    db: HashMap<String, String>,
+    db: HashMap<String, (String, Option<Instant>)>,
 }
 
 impl RedisServer {
@@ -37,7 +39,7 @@ impl RedisServer {
             }
             "set" => {
                 anyhow::ensure!(
-                    array.len() == 3,
+                    array.len() == 3 || array.len() == 5,
                     "unexpected arguments for SET command: {array:?}"
                 );
                 let key = &array[1];
@@ -48,7 +50,17 @@ impl RedisServer {
                 let RedisValue::String(value) = value else {
                     anyhow::bail!("SET argument value must be string: {value:?}");
                 };
-                self.db.insert(key.to_owned(), value.to_owned());
+                let mut expiration = None;
+                if array.len() == 5 {
+                    // TODO: check 4th argument
+                    let RedisValue::String(ref duration) = array[4] else {
+                        anyhow::bail!("SET 4th argument key must be string: {:?}", array[4]);
+                    };
+                    expiration =
+                        Some(Instant::now().add(Duration::from_millis(duration.parse::<u64>()?)));
+                }
+                self.db
+                    .insert(key.to_owned(), (value.to_owned(), expiration));
                 Ok(RedisValue::String("OK".to_string()))
             }
             "get" => {
@@ -60,10 +72,19 @@ impl RedisServer {
                 let RedisValue::String(key) = key else {
                     anyhow::bail!("GET argument key must be string: {key:?}");
                 };
-                Ok(self
-                    .db
-                    .get(key)
-                    .map_or(RedisValue::None, |v| RedisValue::String(v.to_owned())))
+                let value = self.db.get(key);
+                let Some(value) = value else {
+                    return Ok(RedisValue::None);
+                };
+                let retval = match value.1 {
+                    None => Some(value.0.to_owned()),
+                    Some(expiration) if expiration < Instant::now() => {
+                        self.db.remove(key);
+                        None
+                    }
+                    Some(_) => Some(value.0.to_owned()),
+                };
+                Ok(retval.map_or_else(|| RedisValue::None, RedisValue::String))
             }
             _ => todo!(),
         }
