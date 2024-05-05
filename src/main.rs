@@ -1,3 +1,5 @@
+use std::sync::{Arc, Mutex};
+
 use tokio::io::{AsyncWriteExt, BufReader};
 use tokio::net::TcpListener;
 
@@ -13,15 +15,14 @@ const ADDR: &str = "127.0.0.1:6379";
 async fn main() -> anyhow::Result<()> {
     let listener = TcpListener::bind(ADDR).await?;
     println!("Listening on: {}", ADDR);
+    let server = Arc::new(Mutex::new(RedisServer::new()));
 
     loop {
         let (socket, _) = listener.accept().await?;
+        let server = server.clone();
 
         tokio::spawn(async move {
             let mut socket = std::pin::pin!(BufReader::new(socket));
-
-            // TODO
-            let server = RedisServer {};
 
             loop {
                 let token_result = parser::parse_token(&mut socket).await;
@@ -30,7 +31,7 @@ async fn main() -> anyhow::Result<()> {
                     break;
                 }
                 // TODO
-                let response = server.run(token_result.expect("todo"));
+                let response = server.lock().unwrap().run(token_result.expect("todo"));
                 if response.is_err() {
                     eprintln!("failed to make a response: {:?}", response.err());
                 } else {

@@ -1,9 +1,17 @@
+use std::collections::HashMap;
+
 use crate::parser::RedisValue;
 
-pub struct RedisServer {}
+pub struct RedisServer {
+    db: HashMap<String, String>,
+}
 
 impl RedisServer {
-    pub fn run(&self, value: RedisValue) -> anyhow::Result<RedisValue> {
+    pub fn new() -> Self {
+        Self { db: HashMap::new() }
+    }
+
+    pub fn run(&mut self, value: RedisValue) -> anyhow::Result<RedisValue> {
         let RedisValue::Array(array) = value else {
             anyhow::bail!("Unexpected redis value: {value:?}")
         };
@@ -19,13 +27,43 @@ impl RedisServer {
             "echo" => {
                 anyhow::ensure!(
                     array.len() == 2,
-                    "unexpected arguments for echo command: {array:?}"
+                    "unexpected arguments for ECHO command: {array:?}"
                 );
-                let argument = array.into_iter().nth(1).unwrap();
+                let argument = &array[1];
                 let RedisValue::String(argument) = argument else {
                     anyhow::bail!("echo argument needs a String value: {argument:?}");
                 };
-                Ok(RedisValue::String(argument))
+                Ok(RedisValue::String(argument.to_owned()))
+            }
+            "set" => {
+                anyhow::ensure!(
+                    array.len() == 3,
+                    "unexpected arguments for SET command: {array:?}"
+                );
+                let key = &array[1];
+                let RedisValue::String(key) = key else {
+                    anyhow::bail!("SET argument key must be string: {key:?}");
+                };
+                let value = &array[2];
+                let RedisValue::String(value) = value else {
+                    anyhow::bail!("SET argument value must be string: {value:?}");
+                };
+                self.db.insert(key.to_owned(), value.to_owned());
+                Ok(RedisValue::String("Ok".to_string()))
+            }
+            "get" => {
+                anyhow::ensure!(
+                    array.len() == 2,
+                    "unexpected arguments for GET command: {array:?}"
+                );
+                let key = &array[1];
+                let RedisValue::String(key) = key else {
+                    anyhow::bail!("GET argument key must be string: {key:?}");
+                };
+                Ok(self
+                    .db
+                    .get(key)
+                    .map_or(RedisValue::None, |v| RedisValue::String(v.to_owned())))
             }
             _ => todo!(),
         }
