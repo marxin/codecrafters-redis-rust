@@ -86,6 +86,19 @@ impl RedisServer {
                 };
                 Ok(retval.map_or_else(|| RedisValue::None, RedisValue::String))
             }
+            "info" => {
+                anyhow::ensure!(
+                    array.len() == 2,
+                    "unexpected arguments for INFO command: {array:?}"
+                );
+                let detail = &array[1];
+                let RedisValue::String(detail) = detail else {
+                    anyhow::bail!("INFO argument key must be string: {detail:?}");
+                };
+                anyhow::ensure!(detail == "replication");
+
+                Ok(RedisValue::String("role:master\n".to_string()))
+            }
             _ => todo!(),
         }
     }
