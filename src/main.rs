@@ -1,4 +1,4 @@
-use std::net::SocketAddr;
+use std::net::{Ipv4Addr, SocketAddr};
 use std::sync::{Arc, Mutex};
 
 use clap::Parser;
@@ -15,18 +15,23 @@ mod server;
 #[command(version, about, long_about = None)]
 struct Args {
     /// Port to listed to
-    #[arg(short, long, default_value_t = 6379)]
+    #[arg(long, default_value_t = 6379)]
     port: u16,
+    /// Replica of a master instance
+    #[arg(long, num_args(2))]
+    replicaof: Option<Vec<String>>,
 }
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let args = Args::parse();
-    let addr = SocketAddr::from(([127, 0, 0, 1], args.port));
+    let addr = SocketAddr::from((Ipv4Addr::LOCALHOST, args.port));
 
     let listener = TcpListener::bind(addr).await?;
     println!("Listening on: {}", addr);
-    let server = Arc::new(Mutex::new(RedisServer::new()));
+    let server = Arc::new(Mutex::new(RedisServer::new(
+        args.replicaof.map(|arg| arg.join(":")),
+    )));
 
     loop {
         let (socket, _) = listener.accept().await?;

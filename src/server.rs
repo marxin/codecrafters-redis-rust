@@ -6,11 +6,15 @@ use crate::parser::RedisValue;
 
 pub struct RedisServer {
     db: HashMap<String, (String, Option<Instant>)>,
+    replicateof: Option<String>,
 }
 
 impl RedisServer {
-    pub fn new() -> Self {
-        Self { db: HashMap::new() }
+    pub fn new(replicateof: Option<String>) -> Self {
+        Self {
+            db: HashMap::new(),
+            replicateof,
+        }
     }
 
     pub fn run(&mut self, value: RedisValue) -> anyhow::Result<RedisValue> {
@@ -97,7 +101,14 @@ impl RedisServer {
                 };
                 anyhow::ensure!(detail == "replication");
 
-                Ok(RedisValue::String("role:master\n".to_string()))
+                Ok(RedisValue::String(format!(
+                    "role:{}\n",
+                    if self.replicateof.is_some() {
+                        "slave"
+                    } else {
+                        "master"
+                    }
+                )))
             }
             _ => todo!(),
         }
