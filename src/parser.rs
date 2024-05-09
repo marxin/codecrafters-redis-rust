@@ -1,19 +1,20 @@
-use std::pin::Pin;
-
 use anyhow::Context;
-use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncReadExt};
+use tokio::{
+    io::{AsyncBufRead, AsyncBufReadExt, AsyncReadExt, BufReader},
+    net::TcpStream,
+};
 
 const SEPARATOR: &[u8; 2] = b"\r\n";
 const SEPARATOR_STRING: &str = "\r\n";
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum RedisValue {
     String(String),
     Array(Vec<RedisValue>),
     None,
 }
 
-async fn read_n<R: AsyncBufRead>(reader: &mut Pin<&mut R>, n: usize) -> anyhow::Result<Vec<u8>> {
+async fn read_n(reader: &mut BufReader<TcpStream>, n: usize) -> anyhow::Result<Vec<u8>> {
     let mut buffer = vec![0u8; n];
     reader
         .read_exact(&mut buffer)
@@ -22,7 +23,7 @@ async fn read_n<R: AsyncBufRead>(reader: &mut Pin<&mut R>, n: usize) -> anyhow::
     Ok(buffer)
 }
 
-async fn next_char<R: AsyncBufRead>(reader: &mut Pin<&mut R>) -> anyhow::Result<u8> {
+async fn next_char(reader: &mut BufReader<TcpStream>) -> anyhow::Result<u8> {
     read_n(reader, 1)
         .await?
         .into_iter()
@@ -30,35 +31,43 @@ async fn next_char<R: AsyncBufRead>(reader: &mut Pin<&mut R>) -> anyhow::Result<
         .ok_or(anyhow::anyhow!("a non empty string expected"))
 }
 
-async fn next_part<R: AsyncBufRead>(reader: &mut Pin<&mut R>) -> anyhow::Result<String> {
+async fn next_part(
+    reader: &mut BufReader<TcpStream>,
+    read_bytes: &mut usize,
+) -> anyhow::Result<String> {
     let mut buffer = Vec::new();
-    reader.read_until(SEPARATOR[0], &mut buffer).await?;
+    (*read_bytes) += reader.read_until(SEPARATOR[0], &mut buffer).await?;
     anyhow::ensure!(next_char(reader).await? == SEPARATOR[1]);
+    (*read_bytes) += 1;
 
     // pop the trailing separator
     buffer.pop().ok_or(anyhow::anyhow!("pop trailing char"))?;
     Ok(String::from_utf8(buffer)?)
 }
 
-pub async fn parse_token<R: AsyncBufRead>(reader: &mut Pin<&mut R>) -> anyhow::Result<RedisValue> {
+pub async fn parse_token(reader: &mut BufReader<TcpStream>) -> anyhow::Result<(RedisValue, usize)> {
+    let mut read_bytes = 0;
     let Ok(start_letter) = next_char(reader).await else {
-        return Ok(RedisValue::None);
+        return Ok((RedisValue::None, read_bytes));
     };
+    read_bytes += 1;
 
     match start_letter {
         b'$' => {
-            let length = next_part(reader).await?.parse::<usize>()?;
+            let length = next_part(reader, &mut read_bytes).await?.parse::<usize>()?;
             let value = read_n(reader, length).await?;
             anyhow::ensure!(&read_n(reader, 2).await? == SEPARATOR);
-            Ok(RedisValue::String(String::from_utf8(value)?))
+            Ok((RedisValue::String(String::from_utf8(value)?), read_bytes))
         }
         b'*' => {
-            let element_count = next_part(reader).await?.parse::<usize>()?;
+            let element_count = next_part(reader, &mut read_bytes).await?.parse::<usize>()?;
             let mut elements = Vec::new();
             for _ in 0..element_count {
-                elements.push(Box::pin(parse_token(reader)).await?);
+                let (element, read) = Box::pin(parse_token(reader)).await?;
+                read_bytes += read;
+                elements.push(element);
             }
-            Ok(RedisValue::Array(elements))
+            Ok((RedisValue::Array(elements), read_bytes))
         }
         _ => anyhow::bail!(format!(
             "Unsupported leading character: '{}'",
