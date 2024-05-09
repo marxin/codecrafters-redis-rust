@@ -100,33 +100,6 @@ impl TryFrom<RedisValue> for RedisRequest {
             }
             _ => todo!(),
         }
-
-        /*
-
-
-        "info" => {
-            anyhow::ensure!(
-                array.len() == 2,
-                "unexpected arguments for INFO command: {array:?}"
-            );
-            let detail = &array[1];
-            let RedisValue::String(detail) = detail else {
-                anyhow::bail!("INFO argument key must be string: {detail:?}");
-            };
-            anyhow::ensure!(detail == "replication");
-
-            let output = if self.replicateof.is_some() {
-                "role:slave\n".to_string()
-            } else {
-                format!(
-                    "role:master\nmaster_replid:{}\nmaster_repl_offset:0\n",
-                    hex::encode(self.replication_id)
-                )
-            };
-
-            Ok(RedisValue::String(output))
-        }
-        */
     }
 }
 
