@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use anyhow::Ok;
 
-use crate::parser::{parse_token, RedisValue};
+use crate::parser::RedisValue;
 
 #[derive(Debug)]
 pub enum RedisRequest {

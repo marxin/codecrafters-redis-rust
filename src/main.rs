@@ -1,15 +1,13 @@
-use std::any;
 use std::collections::HashMap;
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
-use std::ops::Add;
 use std::sync::{Arc, Mutex};
 
 use clap::Parser;
-use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{broadcast, mpsc};
 use tokio::task::JoinSet;
-use tokio::time::{Duration, Instant};
+use tokio::time::Instant;
 
 use crate::parser::RedisValue;
 use crate::server::RedisServer;
@@ -127,7 +125,7 @@ impl RedisServer2 {
     fn start_expiration_thread(
         storage: Storage,
         mut exp_rx: mpsc::Receiver<(String, Instant)>,
-        mut repl_tx: mpsc::Sender<RedisValue>,
+        repl_tx: mpsc::Sender<RedisValue>,
     ) {
         tokio::spawn(async move {
             let mut set = JoinSet::new();

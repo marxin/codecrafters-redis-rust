@@ -1,9 +1,6 @@
 use std::collections::HashMap;
-use std::ops::Add;
-use std::time::{Duration, Instant};
 
 use crate::command::{RedisRequest, RedisResponse};
-use crate::parser::RedisValue;
 
 pub struct RedisServer {
     db: HashMap<String, String>,

@@ -1,6 +1,6 @@
 use anyhow::Context;
 use tokio::{
-    io::{AsyncBufRead, AsyncBufReadExt, AsyncReadExt, BufReader},
+    io::{AsyncBufReadExt, AsyncReadExt, BufReader},
     net::TcpStream,
 };
 
