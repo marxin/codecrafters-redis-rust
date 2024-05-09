@@ -163,27 +163,6 @@ impl RedisServer2 {
     }
 }
 
-/*
-impl Wrapper {
-    fn new() -> Self {
-        let dictionary = Arc::new(Mutex::new(HashMap::new()));
-        let cloned_dictionary = dictionary.clone();
-
-        tokio::spawn(async move {
-            let mut counter = 0;
-            loop {
-                cloned_dictionary.lock().unwrap().insert(counter, counter);
-                counter += 1;
-                tokio::time::sleep(Duration::from_millis(100)).await;
-                println!("hello from spawn");
-            }
-        });
-
-        Self { dictionary }
-    }
-}
-*/
-
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let args = Args::parse();
@@ -208,10 +187,10 @@ async fn main() -> anyhow::Result<()> {
             let mut socket = std::pin::pin!(BufReader::new(socket));
 
             loop {
-                let token_result = parser::parse_token(&mut socket).await;
+                let token_result = parser::parse_token(&mut socket).await.unwrap();
+                println!("parsed command: {token_result:?}");
                 // TODO
-                let command = RedisRequest::try_from(token_result.unwrap().0).unwrap();
-                println!("parsed command: {command:?}");
+                let command = RedisRequest::try_from(token_result.0).unwrap();
                 if matches!(command, RedisRequest::Null) {
                     break;
                 }

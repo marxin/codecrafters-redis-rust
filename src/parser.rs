@@ -57,6 +57,7 @@ pub async fn parse_token(reader: &mut BufReader<TcpStream>) -> anyhow::Result<(R
             let length = next_part(reader, &mut read_bytes).await?.parse::<usize>()?;
             let value = read_n(reader, length).await?;
             anyhow::ensure!(&read_n(reader, 2).await? == SEPARATOR);
+            read_bytes += length + 2;
             Ok((RedisValue::String(String::from_utf8(value)?), read_bytes))
         }
         b'*' => {
