@@ -19,6 +19,9 @@ pub enum RedisRequest {
         value: String,
         expiration: Option<Duration>,
     },
+    Del {
+        key: String,
+    },
     Info,
 }
 
@@ -87,6 +90,15 @@ impl TryFrom<RedisValue> for RedisRequest {
                     value: value.clone(),
                     expiration: None,
                 })
+            }
+            "del" => {
+                let key = array
+                    .get(1)
+                    .ok_or(anyhow::anyhow!("DEL argument expected"))?;
+                let RedisValue::String(key) = key else {
+                    anyhow::bail!("DEL key must be string");
+                };
+                Ok(RedisRequest::Del { key: key.clone() })
             }
             "info" => {
                 let detail = array

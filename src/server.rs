@@ -29,6 +29,9 @@ impl RedisServer {
                 self.db.insert(key, value);
                 Ok(RedisResponse::String("OK".to_string()))
             }
+            RedisRequest::Del { key } => Ok(RedisResponse::String(
+                self.db.remove(&key).map_or(0, |_| 1).to_string(),
+            )),
             RedisRequest::Info => {
                 let output = if self.replicateof.is_some() {
                     "role:slave\n".to_string()
