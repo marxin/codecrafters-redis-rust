@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex};
 use clap::Parser;
 use tokio::io::{AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::{broadcast, mpsc};
+use tokio::sync::{broadcast, mpsc, watch};
 use tokio::task::JoinSet;
 use tokio::time::Instant;
 
@@ -31,10 +31,15 @@ struct Args {
 
 #[derive(Debug)]
 struct ReplicationMonitor {
+    /// Receiver for operations that need to be replicated.
     broadcast_rx: broadcast::Receiver<RedisValue>,
-
-    /// Replication monitor used for e.g. WAIT operation
+    /// Replication monitor used for e.g. WAIT operation.
     latest_repl_id: HashMap<SocketAddrV4, u64>,
+    /// Total number of bytes of the writes operations.
+    total_written_bytes: u64,
+    /// Watch notifier about the confirmed command by replicas.
+    replicated_update_tx: watch::Sender<Vec<u64>>,
+    replicated_update_rx: watch::Receiver<Vec<u64>>,
 }
 
 impl ReplicationMonitor {
@@ -51,9 +56,14 @@ impl ReplicationMonitor {
             }
         });
 
+        let replicated_update_channel = watch::channel(Vec::new());
+
         Self {
             broadcast_rx,
             latest_repl_id: HashMap::default(),
+            total_written_bytes: 0,
+            replicated_update_tx: replicated_update_channel.0,
+            replicated_update_rx: replicated_update_channel.1,
         }
     }
 
@@ -72,14 +82,14 @@ type Storage = Arc<Mutex<HashMap<String, String>>>;
 
 #[derive(Debug)]
 struct RedisServer2 {
-    /// Key-value storage of the server
+    /// Key-value storage of the server.
     storage: Storage,
 
-    /// Replication
+    /// Replication-related fields.
     repl_tx: mpsc::Sender<RedisValue>,
     repl_monitor: ReplicationMonitor,
 
-    /// Key expiration related channels
+    /// Key expiration related channel.
     expiration_tx: mpsc::Sender<(String, Instant)>,
 }
 
