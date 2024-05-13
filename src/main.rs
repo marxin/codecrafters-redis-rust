@@ -8,6 +8,7 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{broadcast, mpsc, watch};
 use tokio::task::JoinSet;
 use tokio::time::Instant;
+use tracing::{debug, error, info, warn};
 
 use crate::parser::RedisValue;
 use crate::server::RedisServer;
@@ -175,6 +176,8 @@ impl RedisServer2 {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    tracing_subscriber::fmt::init();
+
     let args = Args::parse();
     let addr = SocketAddr::from((Ipv4Addr::LOCALHOST, args.port));
 
@@ -184,7 +187,7 @@ async fn main() -> anyhow::Result<()> {
     */
 
     let listener = TcpListener::bind(addr).await?;
-    println!("Listening on: {}", addr);
+    info!("listening on: {}", addr);
     let server = Arc::new(Mutex::new(RedisServer::new(
         args.replicaof.map(|arg| arg.join(":")),
     )));
@@ -198,7 +201,7 @@ async fn main() -> anyhow::Result<()> {
 
             loop {
                 let token_result = parser::parse_token(&mut socket).await.unwrap();
-                println!("parsed command: {token_result:?}");
+                debug!("parsed command: {token_result:?}");
                 // TODO
                 let command = RedisRequest::try_from(token_result.0).unwrap();
                 if matches!(command, RedisRequest::Null) {
@@ -207,15 +210,15 @@ async fn main() -> anyhow::Result<()> {
                 // TODO
                 let response = server.lock().unwrap().run(command);
                 if response.is_err() {
-                    eprintln!("failed to make a response: {:?}", response.err());
+                    warn!("failed to make a response: {:?}", response.err());
                 } else {
-                    println!("Sending reply: {response:?}");
+                    debug!("sending reply: {response:?}");
                     // TODO
                     let written = socket
                         .write_all(response.unwrap().serialize().as_bytes())
                         .await;
                     if written.is_err() {
-                        eprintln!("Failed to reply: {:?}", written.err());
+                        warn!("Failed to reply: {:?}", written.err());
                     }
                 }
             }
