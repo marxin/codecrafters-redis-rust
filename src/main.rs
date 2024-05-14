@@ -8,7 +8,7 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{broadcast, mpsc, watch};
 use tokio::task::JoinSet;
 use tokio::time::Instant;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info, info_span, warn, Instrument};
 
 use crate::parser::RedisValue;
 use crate::server::RedisServer;
@@ -193,35 +193,43 @@ async fn main() -> anyhow::Result<()> {
     )));
 
     loop {
-        let (socket, _) = listener.accept().await?;
+        let (socket, addr) = listener.accept().await?;
         let server = server.clone();
 
-        tokio::spawn(async move {
-            let mut socket = std::pin::pin!(BufReader::new(socket));
+        tokio::spawn(
+            async move {
+                let mut socket = BufReader::new(socket);
 
-            loop {
-                let token_result = parser::parse_token(&mut socket).await.unwrap();
-                debug!("parsed command: {token_result:?}");
-                // TODO
-                let command = RedisRequest::try_from(token_result.0).unwrap();
-                if matches!(command, RedisRequest::Null) {
-                    break;
-                }
-                // TODO
-                let response = server.lock().unwrap().run(command);
-                if response.is_err() {
-                    warn!("failed to make a response: {:?}", response.err());
-                } else {
-                    debug!("sending reply: {response:?}");
+                loop {
+                    let token_result = parser::parse_token(&mut socket).await.unwrap();
+                    debug!("parsed command: {token_result:?}");
                     // TODO
-                    let written = socket
-                        .write_all(response.unwrap().serialize().as_bytes())
-                        .await;
-                    if written.is_err() {
-                        warn!("Failed to reply: {:?}", written.err());
+                    let command = RedisRequest::try_from(token_result.0);
+                    if command.is_err() {
+                        error!("could not parse request: {:?}", command.err());
+                        break;
+                    }
+                    let command = command.unwrap();
+                    if matches!(command, RedisRequest::Null) {
+                        break;
+                    }
+                    // TODO
+                    let response = server.lock().unwrap().run(command);
+                    if response.is_err() {
+                        warn!("failed to make a response: {:?}", response.err());
+                    } else {
+                        debug!("sending reply: {response:?}");
+                        // TODO
+                        let written = socket
+                            .write_all(response.unwrap().serialize().as_bytes())
+                            .await;
+                        if written.is_err() {
+                            warn!("Failed to reply: {:?}", written.err());
+                        }
                     }
                 }
             }
-        });
+            .instrument(info_span!("connection", addr = %addr)),
+        );
     }
 }

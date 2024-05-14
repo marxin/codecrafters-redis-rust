@@ -110,7 +110,7 @@ impl TryFrom<RedisValue> for RedisRequest {
                 anyhow::ensure!(detail == "replication");
                 Ok(RedisRequest::Info)
             }
-            _ => todo!(),
+            command => anyhow::bail!("Unknown command: {command}"),
         }
     }
 }
