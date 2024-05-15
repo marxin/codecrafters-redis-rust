@@ -22,7 +22,7 @@ use crate::{
 #[derive(Debug)]
 struct ReplicationMonitor {
     /// Receiver for operations that need to be replicated.
-    broadcast_rx: broadcast::Receiver<RedisValue>,
+    broadcast_rx: broadcast::Receiver<RedisRequest>,
     /// Replication monitor used for e.g. WAIT operation.
     latest_repl_id: HashMap<SocketAddrV4, u64>,
     /// Total number of bytes of the writes operations.
@@ -33,7 +33,7 @@ struct ReplicationMonitor {
 }
 
 impl ReplicationMonitor {
-    fn new(mut repl_rx: mpsc::Receiver<RedisValue>) -> Self {
+    fn new(mut repl_rx: mpsc::Receiver<RedisRequest>) -> Self {
         // TODO: factor out capacity
         let (broadcast_tx, broadcast_rx) = broadcast::channel(16);
 
@@ -82,7 +82,7 @@ pub struct RedisServer {
     replication_id: [u8; 20],
 
     /// Replication-related fields.
-    repl_tx: mpsc::Sender<RedisValue>,
+    repl_tx: mpsc::Sender<RedisRequest>,
     repl_monitor: ReplicationMonitor,
 
     /// Key expiration related channel.
@@ -148,7 +148,7 @@ impl RedisServer {
     fn start_expiration_thread(
         storage: Storage,
         mut exp_rx: mpsc::Receiver<(String, Instant)>,
-        repl_tx: mpsc::Sender<RedisValue>,
+        repl_tx: mpsc::Sender<RedisRequest>,
     ) {
         tokio::spawn(
             async move {
@@ -177,7 +177,7 @@ impl RedisServer {
                                 let key = key.unwrap().unwrap();
                                 let _ = storage.lock().unwrap().remove(&key);
                                 // TODO
-                                repl_tx.send(RedisValue::None).await.unwrap();
+                                repl_tx.send(RedisRequest::Del { key: key.clone() }).await.unwrap();
                                 debug!("removed {key}");
                             }
                         }
@@ -201,22 +201,37 @@ impl RedisServer {
                 value,
                 expiration,
             } => {
-                self.storage.lock().unwrap().insert(key.clone(), value);
-                if let Some(expiration) = expiration {
-                    self.expiration_tx
-                        .send((key, Instant::now().add(expiration)))
-                        .await;
-                }
-                Ok(RedisResponse::String("OK".to_string()))
-            }
-            RedisRequest::Del { key } => Ok(RedisResponse::String(
                 self.storage
                     .lock()
                     .unwrap()
-                    .remove(&key)
-                    .map_or(0, |_| 1)
-                    .to_string(),
-            )),
+                    .insert(key.clone(), value.clone());
+                if let Some(expiration) = expiration {
+                    self.expiration_tx
+                        .send((key.clone(), Instant::now().add(expiration)))
+                        .await?;
+                }
+                self.repl_tx
+                    .send(RedisRequest::Set {
+                        key,
+                        value,
+                        expiration: None,
+                    })
+                    .await?;
+                Ok(RedisResponse::String("OK".to_string()))
+            }
+            RedisRequest::Del { key } => {
+                self.repl_tx
+                    .send(RedisRequest::Del { key: key.clone() })
+                    .await?;
+                Ok(RedisResponse::String(
+                    self.storage
+                        .lock()
+                        .unwrap()
+                        .remove(&key)
+                        .map_or(0, |_| 1)
+                        .to_string(),
+                ))
+            }
             RedisRequest::Info => {
                 let output = if self.replicateof.is_some() {
                     "role:slave\n".to_string()

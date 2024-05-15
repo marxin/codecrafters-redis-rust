@@ -4,7 +4,7 @@ use anyhow::Ok;
 
 use crate::parser::RedisValue;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum RedisRequest {
     Null,
     Ping,

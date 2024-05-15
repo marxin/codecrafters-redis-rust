@@ -1,5 +1,5 @@
 use std::net::{Ipv4Addr, SocketAddr};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use clap::Parser;
 
