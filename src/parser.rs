@@ -71,8 +71,8 @@ pub async fn parse_token(reader: &mut BufReader<TcpStream>) -> anyhow::Result<(R
             Ok((RedisValue::Array(elements), read_bytes))
         }
         _ => anyhow::bail!(format!(
-            "Unsupported leading character: '{}'",
-            start_letter as char
+            "Unsupported leading character: '0x{:x}'",
+            start_letter
         )),
     }
 }
@@ -93,7 +93,7 @@ impl RedisValue {
                     .map(|v| v.serialize())
                     .collect::<Vec<_>>()
                     .join("");
-                format!("*{length}{SEPARATOR_STRING}{content}{SEPARATOR_STRING}")
+                format!("*{length}{SEPARATOR_STRING}{content}")
             }
             RedisValue::None => format!("$-1{SEPARATOR_STRING}"),
         }

@@ -1,13 +1,16 @@
 use std::net::{Ipv4Addr, SocketAddr};
+use std::str::FromStr;
 use std::sync::Arc;
 
 use clap::Parser;
+use replica::RedisReplica;
 
 use crate::server::RedisServer;
 
 mod command;
 mod parser;
 mod server;
+mod replica;
 
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
@@ -28,7 +31,8 @@ async fn main() -> anyhow::Result<()> {
     let addr = SocketAddr::from((Ipv4Addr::LOCALHOST, args.port));
 
     if let Some(replica) = args.replicaof {
-        todo!("replica server not implement yet");
+        let replica = RedisReplica::new(SocketAddr::from_str(&replica.join(":"))?);
+        replica.start_server(addr).await
     } else {
         let server = Arc::new(RedisServer::new());
         RedisServer::start_server(server, addr).await

@@ -60,14 +60,12 @@ impl ReplicationMonitor {
         }
     }
 
-    fn handle_replica(&self, mut stream: BufReader<TcpStream>) {
-        tokio::spawn(async move {
-            loop {
-                println!("handling replication server part here!!!");
-                let mut buf = [0u8; 1024];
-                stream.read_exact(&mut buf).await.unwrap();
-            }
-        });
+    async fn handle_replica(&self, mut stream: BufReader<TcpStream>) -> anyhow::Result<()> {
+        stream.write_all(RedisValue::String("OK".to_string()).serialize().as_bytes()).await?;
+        let token_result = parser::parse_token(&mut stream).await.unwrap();
+        debug!("parsed command: {token_result:?}");
+
+        Ok(())
     }
 }
 
@@ -106,20 +104,28 @@ impl RedisServer {
         }
     }
 
-    async fn handle_connection(&self, socket: TcpStream) -> anyhow::Result<()> {
-        let mut socket = BufReader::new(socket);
+    async fn handle_connection(&self, stream: TcpStream) -> anyhow::Result<()> {
+        let mut stream = BufReader::new(stream);
 
         loop {
-            let token_result = parser::parse_token(&mut socket).await.unwrap();
+            let token_result = parser::parse_token(&mut stream).await.unwrap();
             debug!("parsed command: {token_result:?}");
             let command = RedisRequest::try_from(token_result.0)?;
-            if matches!(command, RedisRequest::Null) {
-                break;
+            match command {
+                RedisRequest::Null => break,
+                RedisRequest::ReplConf { arg, value } => {
+                    anyhow::ensure!(arg == "listening-port");
+                    info!("moving replication client to monitor");
+                    self.repl_monitor.handle_replica(stream).await?;
+                    return Ok(())
+                },
+                _ => {
+                    let response = self.run(command).await?;
+                    debug!("sending reply: {response:?}");
+                    // TODO
+                    stream.write_all(response.serialize().as_bytes()).await?;
+                }
             }
-            let response = self.run(command).await?;
-            debug!("sending reply: {response:?}");
-            // TODO
-            socket.write_all(response.serialize().as_bytes()).await?;
         }
 
         Ok(())
@@ -130,60 +136,17 @@ impl RedisServer {
         info!("Listening on: {}", addr);
 
         loop {
-            let (socket, addr) = listener.accept().await?;
+            let (stream, addr) = listener.accept().await?;
             let server = server.clone();
             tokio::spawn(
                 async move {
-                    if let Err(err) = server.handle_connection(socket).await {
+                    if let Err(err) = server.handle_connection(stream).await {
                         error!("handle connection failed: {err}");
                     }
                 }
                 .instrument(info_span!("connection", addr = %addr)),
             );
         }
-    }
-
-    fn start_expiration_thread(
-        storage: Storage,
-        mut exp_rx: mpsc::Receiver<(String, Instant)>,
-        repl_tx: mpsc::Sender<RedisRequest>,
-    ) {
-        tokio::spawn(
-            async move {
-                let mut set = JoinSet::new();
-
-                loop {
-                    let storage = storage.clone();
-                    let plan_fn = |set: &mut JoinSet<String>, key, deadline| {
-                        debug!("planning sleep: {key}, deadline: {deadline:?}");
-                        set.spawn(async move {
-                            tokio::time::sleep_until(deadline).await;
-                            key
-                        });
-                    };
-
-                    if set.is_empty() {
-                        let (key, deadline) = exp_rx.recv().await.unwrap();
-                        plan_fn(&mut set, key, deadline);
-                    } else {
-                        tokio::select! {
-                            request = exp_rx.recv() => {
-                                let (key, deadline) = request.unwrap();
-                                plan_fn(& mut set, key, deadline);
-                            },
-                            key = set.join_next() => {
-                                let key = key.unwrap().unwrap();
-                                let _ = storage.lock().unwrap().remove(&key);
-                                // TODO
-                                repl_tx.send(RedisRequest::Del { key: key.clone() }).await.unwrap();
-                                debug!("removed {key}");
-                            }
-                        }
-                    }
-                }
-            }
-            .instrument(info_span!("expiration handler")),
-        );
     }
 
     async fn run(&self, request: RedisRequest) -> anyhow::Result<RedisResponse> {
@@ -234,7 +197,51 @@ impl RedisServer {
                 "role:master\nmaster_replid:{}\nmaster_repl_offset:0\n",
                 hex::encode(self.replication_id)
             ))),
+            RedisRequest::ReplConf { .. } => anyhow::bail!("REPLCONF should not be handled here"),
             RedisRequest::Null => panic!("unexpected NULL command here"),
         }
     }
+
+    fn start_expiration_thread(
+        storage: Storage,
+        mut exp_rx: mpsc::Receiver<(String, Instant)>,
+        repl_tx: mpsc::Sender<RedisRequest>,
+    ) {
+        tokio::spawn(
+            async move {
+                let mut set = JoinSet::new();
+
+                loop {
+                    let storage = storage.clone();
+                    let plan_fn = |set: &mut JoinSet<String>, key, deadline| {
+                        debug!("planning sleep: {key}, deadline: {deadline:?}");
+                        set.spawn(async move {
+                            tokio::time::sleep_until(deadline).await;
+                            key
+                        });
+                    };
+
+                    if set.is_empty() {
+                        let (key, deadline) = exp_rx.recv().await.unwrap();
+                        plan_fn(&mut set, key, deadline);
+                    } else {
+                        tokio::select! {
+                            request = exp_rx.recv() => {
+                                let (key, deadline) = request.unwrap();
+                                plan_fn(& mut set, key, deadline);
+                            },
+                            key = set.join_next() => {
+                                let key = key.unwrap().unwrap();
+                                let _ = storage.lock().unwrap().remove(&key);
+                                // TODO
+                                repl_tx.send(RedisRequest::Del { key: key.clone() }).await.unwrap();
+                                debug!("removed {key}");
+                            }
+                        }
+                    }
+                }
+            }
+            .instrument(info_span!("expiration handler")),
+        );
+    }    
 }

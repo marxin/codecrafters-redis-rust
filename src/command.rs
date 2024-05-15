@@ -23,6 +23,10 @@ pub enum RedisRequest {
         key: String,
     },
     Info,
+    ReplConf {
+        arg: String,
+        value: String,
+    },
 }
 
 #[derive(Debug)]
@@ -114,6 +118,21 @@ impl TryFrom<RedisValue> for RedisRequest {
                 };
                 anyhow::ensure!(detail == "replication");
                 Ok(RedisRequest::Info)
+            },
+            "replconf" => {
+                let arg = array
+                    .get(1)
+                    .ok_or(anyhow::anyhow!("REPLCONF argument 1 expected"))?;
+                let RedisValue::String(arg) = arg else {
+                    anyhow::bail!("REPLCONF arg must be string");
+                };
+                let value = array
+                    .get(1)
+                    .ok_or(anyhow::anyhow!("REPLCONF argument 2 expected"))?;
+                let RedisValue::String(value) = value else {
+                    anyhow::bail!("REPLCONF arg must be string");
+                };
+                Ok(RedisRequest::ReplConf { arg: arg.clone(), value: value.to_string() })
             }
             command => anyhow::bail!("Unknown command: {command}"),
         }
