@@ -64,6 +64,10 @@ impl ReplicationMonitor {
         stream.write_all(RedisValue::String("OK".to_string()).serialize().as_bytes()).await?;
         let token_result = parser::parse_token(&mut stream).await.unwrap();
         debug!("parsed command: {token_result:?}");
+        stream.write_all(RedisValue::String("OK".to_string()).serialize().as_bytes()).await?;
+        let token_result = parser::parse_token(&mut stream).await.unwrap();
+        debug!("parsed command: {token_result:?}");
+        stream.write_all(RedisValue::String("OK".to_string()).serialize().as_bytes()).await?;
 
         Ok(())
     }

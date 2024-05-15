@@ -24,11 +24,20 @@ impl RedisReplica {
 
         let reply = parser::parse_token(&mut stream).await.unwrap();
         anyhow::ensure!(reply.0 == RedisValue::String("OK".to_string()));
-        debug!("received reply: {:?}", reply.0);
 
         let request = RedisValue::Array(["replconf", "capa", "psync2"].iter().map(|v| RedisValue::String(v.to_string())).collect());
         stream.write_all(request.serialize().as_bytes()).await?;
         info!("REPLCONF 2 sent");
+
+        let reply = parser::parse_token(&mut stream).await.unwrap();
+        anyhow::ensure!(reply.0 == RedisValue::String("OK".to_string()));
+
+        let request = RedisValue::Array(["psync", "?", "-1"].iter().map(|v| RedisValue::String(v.to_string())).collect());
+        stream.write_all(request.serialize().as_bytes()).await?;
+        info!("PSYNC 2 sent");
+
+        let reply = parser::parse_token(&mut stream).await.unwrap();
+        anyhow::ensure!(reply.0 == RedisValue::String("OK".to_string()));
 
         Ok(())
     }
