@@ -11,6 +11,7 @@ use tokio::{
     task::JoinSet,
     time::Instant,
 };
+use tracing::{debug, error, info, info_span, warn, Instrument};
 
 use crate::{
     command::{RedisRequest, RedisResponse},
@@ -103,25 +104,40 @@ impl RedisServer {
         }
     }
 
-    async fn start_server(&self, addr: SocketAddr) -> anyhow::Result<()> {
-        let listener = TcpListener::bind(addr).await?;
-        println!("Listening on: {}", addr);
+    async fn handle_connection(&self, socket: TcpStream, addr: SocketAddr) -> anyhow::Result<()> {
+        let mut socket = BufReader::new(socket);
 
         loop {
-            let (stream, _) = listener.accept().await?;
-            let mut stream = BufReader::new(stream);
+            let token_result = parser::parse_token(&mut socket).await.unwrap();
+            debug!("parsed command: {token_result:?}");
+            let command = RedisRequest::try_from(token_result.0)?;
+            if matches!(command, RedisRequest::Null) {
+                break;
+            }
+            let response = self.run(command)?;
+            debug!("sending reply: {response:?}");
+            // TODO
+            socket.write_all(response.serialize().as_bytes()).await?;
+        }
 
-            let token_result = parser::parse_token(&mut stream).await.unwrap();
-            println!("GOT: {token_result:?}");
-            let (RedisValue::Array(token), _) = token_result else {
-                todo!();
-            };
-            stream
-                .write_all(RedisValue::None.serialize().as_bytes())
-                .await
-                .unwrap();
+        Ok(())
+    }
 
-            self.repl_monitor.handle_replica(stream);
+    pub async fn start_server(server: Arc<RedisServer>, addr: SocketAddr) -> anyhow::Result<()> {
+        let listener = TcpListener::bind(addr).await?;
+        info!("Listening on: {}", addr);
+
+        loop {
+            let (socket, addr) = listener.accept().await?;
+            let server = server.clone();
+            tokio::spawn(
+                async move {
+                    if let Err(err) = server.handle_connection(socket, addr).await {
+                        error!("handle connection failed: {err}");
+                    }
+                }
+                .instrument(info_span!("connection", addr = %addr)),
+            );
         }
     }
 
@@ -165,7 +181,7 @@ impl RedisServer {
         });
     }
 
-    pub fn run(&mut self, request: RedisRequest) -> anyhow::Result<RedisResponse> {
+    pub fn run(&self, request: RedisRequest) -> anyhow::Result<RedisResponse> {
         match request {
             RedisRequest::Ping => Ok(RedisResponse::String("PONG".to_string())),
             RedisRequest::Echo { message } => Ok(RedisResponse::String(message)),
