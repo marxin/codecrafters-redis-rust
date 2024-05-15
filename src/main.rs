@@ -27,6 +27,10 @@ async fn main() -> anyhow::Result<()> {
     let args = Args::parse();
     let addr = SocketAddr::from((Ipv4Addr::LOCALHOST, args.port));
 
-    let server = Arc::new(RedisServer::new(args.replicaof.map(|arg| arg.join(":"))));
-    RedisServer::start_server(server, addr).await
+    if let Some(replica) = args.replicaof {
+        todo!("replica server not implement yet");
+    } else {
+        let server = Arc::new(RedisServer::new());
+        RedisServer::start_server(server, addr).await
+    }
 }

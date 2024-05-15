@@ -78,7 +78,6 @@ pub struct RedisServer {
     /// Key-value storage of the server.
     storage: Storage,
 
-    replicateof: Option<String>,
     replication_id: [u8; 20],
 
     /// Replication-related fields.
@@ -90,7 +89,7 @@ pub struct RedisServer {
 }
 
 impl RedisServer {
-    pub fn new(replicateof: Option<String>) -> Self {
+    pub fn new() -> Self {
         let (exp_tx, exp_rx) = mpsc::channel::<(String, Instant)>(16);
         let (repl_tx, repl_rx) = mpsc::channel(16);
         let storage: Storage = Arc::default();
@@ -103,7 +102,6 @@ impl RedisServer {
             expiration_tx: exp_tx,
             repl_monitor: ReplicationMonitor::new(repl_rx),
             repl_tx: repl_tx.clone(),
-            replicateof,
             replication_id: rand::random(),
         }
     }
@@ -232,18 +230,11 @@ impl RedisServer {
                         .to_string(),
                 ))
             }
-            RedisRequest::Info => {
-                let output = if self.replicateof.is_some() {
-                    "role:slave\n".to_string()
-                } else {
-                    format!(
-                        "role:master\nmaster_replid:{}\nmaster_repl_offset:0\n",
-                        hex::encode(self.replication_id)
-                    )
-                };
-                Ok(RedisResponse::String(output))
-            }
-            _ => todo!(),
+            RedisRequest::Info => Ok(RedisResponse::String(format!(
+                "role:master\nmaster_replid:{}\nmaster_repl_offset:0\n",
+                hex::encode(self.replication_id)
+            ))),
+            RedisRequest::Null => panic!("unexpected NULL command here"),
         }
     }
 }
