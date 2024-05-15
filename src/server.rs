@@ -1,6 +1,7 @@
 use std::{
     collections::HashMap,
     net::{SocketAddr, SocketAddrV4},
+    ops::Add,
     sync::{Arc, Mutex},
 };
 
@@ -36,14 +37,17 @@ impl ReplicationMonitor {
         // TODO: factor out capacity
         let (broadcast_tx, broadcast_rx) = broadcast::channel(16);
 
-        tokio::spawn(async move {
-            loop {
-                let rep = repl_rx.recv().await.unwrap();
-                println!("replicate: {rep:?}");
-                // TODO
-                broadcast_tx.send(rep).unwrap();
+        tokio::spawn(
+            async move {
+                loop {
+                    let rep = repl_rx.recv().await.unwrap();
+                    debug!("replicating command: {rep:?}");
+                    // TODO
+                    broadcast_tx.send(rep).unwrap();
+                }
             }
-        });
+            .instrument(info_span!("replication manager")),
+        );
 
         let replicated_update_channel = watch::channel(Vec::new());
 
@@ -104,7 +108,7 @@ impl RedisServer {
         }
     }
 
-    async fn handle_connection(&self, socket: TcpStream, addr: SocketAddr) -> anyhow::Result<()> {
+    async fn handle_connection(&self, socket: TcpStream) -> anyhow::Result<()> {
         let mut socket = BufReader::new(socket);
 
         loop {
@@ -114,7 +118,7 @@ impl RedisServer {
             if matches!(command, RedisRequest::Null) {
                 break;
             }
-            let response = self.run(command)?;
+            let response = self.run(command).await?;
             debug!("sending reply: {response:?}");
             // TODO
             socket.write_all(response.serialize().as_bytes()).await?;
@@ -132,7 +136,7 @@ impl RedisServer {
             let server = server.clone();
             tokio::spawn(
                 async move {
-                    if let Err(err) = server.handle_connection(socket, addr).await {
+                    if let Err(err) = server.handle_connection(socket).await {
                         error!("handle connection failed: {err}");
                     }
                 }
@@ -146,42 +150,45 @@ impl RedisServer {
         mut exp_rx: mpsc::Receiver<(String, Instant)>,
         repl_tx: mpsc::Sender<RedisValue>,
     ) {
-        tokio::spawn(async move {
-            let mut set = JoinSet::new();
+        tokio::spawn(
+            async move {
+                let mut set = JoinSet::new();
 
-            loop {
-                let storage = storage.clone();
-                let plan_fn = |set: &mut JoinSet<String>, key, deadline| {
-                    println!("planning sleep: {key}, deadline: {deadline:?}");
-                    set.spawn(async move {
-                        tokio::time::sleep_until(deadline).await;
-                        key
-                    });
-                };
+                loop {
+                    let storage = storage.clone();
+                    let plan_fn = |set: &mut JoinSet<String>, key, deadline| {
+                        debug!("planning sleep: {key}, deadline: {deadline:?}");
+                        set.spawn(async move {
+                            tokio::time::sleep_until(deadline).await;
+                            key
+                        });
+                    };
 
-                if set.is_empty() {
-                    let (key, deadline) = exp_rx.recv().await.unwrap();
-                    plan_fn(&mut set, key, deadline);
-                } else {
-                    tokio::select! {
-                        request = exp_rx.recv() => {
-                            let (key, deadline) = request.unwrap();
-                            plan_fn(& mut set, key, deadline);
-                        },
-                        key = set.join_next() => {
-                            let key = key.unwrap().unwrap();
-                            let _ = storage.lock().unwrap().remove(&key);
-                            // TODO
-                            repl_tx.send(RedisValue::None).await.unwrap();
-                            println!("removed {key}");
+                    if set.is_empty() {
+                        let (key, deadline) = exp_rx.recv().await.unwrap();
+                        plan_fn(&mut set, key, deadline);
+                    } else {
+                        tokio::select! {
+                            request = exp_rx.recv() => {
+                                let (key, deadline) = request.unwrap();
+                                plan_fn(& mut set, key, deadline);
+                            },
+                            key = set.join_next() => {
+                                let key = key.unwrap().unwrap();
+                                let _ = storage.lock().unwrap().remove(&key);
+                                // TODO
+                                repl_tx.send(RedisValue::None).await.unwrap();
+                                debug!("removed {key}");
+                            }
                         }
                     }
                 }
             }
-        });
+            .instrument(info_span!("expiration handler")),
+        );
     }
 
-    pub fn run(&self, request: RedisRequest) -> anyhow::Result<RedisResponse> {
+    async fn run(&self, request: RedisRequest) -> anyhow::Result<RedisResponse> {
         match request {
             RedisRequest::Ping => Ok(RedisResponse::String("PONG".to_string())),
             RedisRequest::Echo { message } => Ok(RedisResponse::String(message)),
@@ -189,8 +196,17 @@ impl RedisServer {
                 || RedisResponse::Null,
                 |value| RedisResponse::String(value.clone()),
             )),
-            RedisRequest::Set { key, value, .. } => {
-                self.storage.lock().unwrap().insert(key, value);
+            RedisRequest::Set {
+                key,
+                value,
+                expiration,
+            } => {
+                self.storage.lock().unwrap().insert(key.clone(), value);
+                if let Some(expiration) = expiration {
+                    self.expiration_tx
+                        .send((key, Instant::now().add(expiration)))
+                        .await;
+                }
                 Ok(RedisResponse::String("OK".to_string()))
             }
             RedisRequest::Del { key } => Ok(RedisResponse::String(

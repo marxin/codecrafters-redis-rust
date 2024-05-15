@@ -7,7 +7,7 @@ use tokio::{
 const SEPARATOR: &[u8; 2] = b"\r\n";
 const SEPARATOR_STRING: &str = "\r\n";
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RedisValue {
     String(String),
     Array(Vec<RedisValue>),

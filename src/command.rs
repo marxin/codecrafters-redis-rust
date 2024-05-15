@@ -84,11 +84,16 @@ impl TryFrom<RedisValue> for RedisRequest {
                 let RedisValue::String(value) = value else {
                     anyhow::bail!("SET value must be string");
                 };
+                let mut expiration = None;
+                if let Some(RedisValue::String(e)) = array.get(4) {
+                    // TODO: check PX
+                    expiration = Some(Duration::from_millis(e.parse::<u64>().unwrap()));
+                }
                 // TODO: expiration
                 Ok(RedisRequest::Set {
                     key: key.clone(),
                     value: value.clone(),
-                    expiration: None,
+                    expiration,
                 })
             }
             "del" => {
