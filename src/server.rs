@@ -2,7 +2,10 @@ use std::{
     collections::HashMap,
     net::SocketAddr,
     ops::Add,
-    sync::{Arc, Mutex},
+    sync::{
+        atomic::{AtomicU64, AtomicUsize, Ordering},
+        Arc, Mutex,
+    },
 };
 
 use tokio::{
@@ -28,7 +31,7 @@ struct ReplicationMonitor {
     /// Replication monitor used for e.g. WAIT operation.
     latest_repl_id: Arc<Mutex<HashMap<SocketAddr, u64>>>,
     /// Total number of bytes of the writes operations.
-    total_written_bytes: u64,
+    total_written_bytes: Arc<AtomicUsize>,
     /// Watch notifier about the confirmed command by replicas.
     replicated_update_tx: watch::Sender<Vec<u64>>,
     replicated_update_rx: watch::Receiver<Vec<u64>>,
@@ -39,14 +42,16 @@ impl ReplicationMonitor {
         // TODO: factor out capacity
         let (broadcast_tx, _) = broadcast::channel(16);
 
+        let total_written_bytes: Arc<AtomicUsize> = Arc::default();
         let btx = broadcast_tx.clone();
+        let counter = total_written_bytes.clone();
         tokio::spawn(
             async move {
                 loop {
                     let rep = repl_rx.recv().await.unwrap();
                     debug!("replicating command: {rep:?}");
-                    // TODO
-                    btx.send(rep).unwrap();
+                    counter.fetch_add(rep.to_value().serialize().len(), Ordering::Relaxed);
+                    btx.send(rep.clone()).unwrap();
                 }
             }
             .instrument(info_span!("replication manager")),
@@ -58,7 +63,7 @@ impl ReplicationMonitor {
             replication_id: rand::random(),
             broadcast_tx,
             latest_repl_id: Arc::default(),
-            total_written_bytes: 0,
+            total_written_bytes,
             replicated_update_tx: replicated_update_channel.0,
             replicated_update_rx: replicated_update_channel.1,
         }
@@ -214,19 +219,23 @@ impl RedisServer {
                         .send((key.clone(), Instant::now().add(expiration)))
                         .await?;
                 }
-                self.repl_tx
-                    .send(RedisRequest::Set {
-                        key,
-                        value,
-                        expiration: None,
-                    })
-                    .await?;
+                let cmd = RedisRequest::Set {
+                    key,
+                    value,
+                    expiration: None,
+                };
+                self.repl_tx.send(cmd.clone()).await?;
+                self.repl_monitor
+                    .total_written_bytes
+                    .fetch_add(cmd.to_value().serialize().len(), Ordering::Relaxed);
                 Ok(RedisResponse::String("OK".to_string()))
             }
             RedisRequest::Del { key } => {
-                self.repl_tx
-                    .send(RedisRequest::Del { key: key.clone() })
-                    .await?;
+                let cmd = RedisRequest::Del { key: key.clone() };
+                self.repl_tx.send(cmd.clone()).await?;
+                self.repl_monitor
+                    .total_written_bytes
+                    .fetch_add(cmd.to_value().serialize().len(), Ordering::Relaxed);
                 Ok(RedisResponse::String(
                     self.storage
                         .lock()
@@ -243,12 +252,20 @@ impl RedisServer {
             RedisRequest::ReplConf { .. } => anyhow::bail!("REPLCONF should not be handled here"),
             RedisRequest::Null => panic!("unexpected NULL command here"),
             RedisRequest::Wait { .. } => {
+                let written_bytes = self
+                    .repl_monitor
+                    .total_written_bytes
+                    .load(Ordering::Relaxed);
+                info!("current replication counter: {written_bytes}");
+
+                let cmd = RedisRequest::ReplConf {
+                    arg: "GETACK".to_string(),
+                    value: "*".to_string(),
+                };
+                self.repl_monitor.broadcast_tx.send(cmd.clone())?;
                 self.repl_monitor
-                    .broadcast_tx
-                    .send(RedisRequest::ReplConf {
-                        arg: "GETACK".to_string(),
-                        value: "*".to_string(),
-                    })?;
+                    .total_written_bytes
+                    .fetch_add(cmd.to_value().serialize().len(), Ordering::Relaxed);
                 Ok(RedisResponse::Integer(
                     self.repl_monitor.latest_repl_id.lock().unwrap().len() as i64,
                 ))
