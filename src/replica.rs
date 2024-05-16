@@ -67,7 +67,10 @@ impl RedisReplica {
         // TODO: check arguments of FULLRESYNC
 
         let reply = parser::parse_file(&mut stream).await.unwrap();
-        info!("got RDB file, starting main loop in replica");
+        let RedisValue::File(content) = reply else {
+            panic!();
+        };
+        info!("got RDB file ({}), starting main loop in replica", content.len());
 
         loop {
             let token_result = parser::parse_token(&mut stream).await.unwrap();
