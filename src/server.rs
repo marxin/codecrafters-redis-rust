@@ -94,9 +94,9 @@ impl ReplicationMonitor {
         // process replication channel here
         let mut receiver = self.broadcast_tx.subscribe();
         while let Ok(command) = receiver.recv().await {
+            info!("sending replication: {command:?}");
             match command {
                 RedisRequest::Set { .. } | RedisRequest::Del { .. } => {
-                    info!("sending replication: {command:?}");
                     stream.write_all(&command.to_value().serialize()).await?;
                 }
                 RedisRequest::ReplConf { .. } => {
