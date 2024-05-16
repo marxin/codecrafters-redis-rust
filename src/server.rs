@@ -98,6 +98,10 @@ impl ReplicationMonitor {
             match command {
                 RedisRequest::Set { .. } | RedisRequest::Del { .. } => {
                     stream.write_all(&command.to_value().serialize()).await?;
+                    let reply = parser::parse_token(&mut stream).await.unwrap().0;
+                    if reply != RedisValue::None {
+                        warn!("unexpceted reply: {reply:?}");
+                    }
                 }
                 RedisRequest::ReplConf { .. } => {
                     stream.write_all(&command.to_value().serialize()).await?;
@@ -105,8 +109,8 @@ impl ReplicationMonitor {
                     let command = RedisRequest::try_from(reply)?;
                     info!("replconf reply received: {command:?}");
                     let RedisRequest::ReplConf { value, .. } = command else {
-                        warn!("replconf expect a valid reply");
-                        continue;
+                        error!("replconf expect a valid reply");
+                        break;
                     };
                     let replicated_counter = value.parse::<u64>()?;
                     let mut latest_repl_id = self.latest_repl_id.lock().unwrap();
