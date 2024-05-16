@@ -158,6 +158,7 @@ impl RedisRequest {
             RedisRequest::Set { key, value, .. } => {
                 ["SET", key.as_str(), value.as_str()][..].into()
             }
+            RedisRequest::Del { key } => ["DEL", key][..].into(),
             _ => todo!(),
         }
     }

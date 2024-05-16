@@ -86,6 +86,9 @@ impl RedisReplica {
                 RedisRequest::Set { key, value, .. } => {
                     self.storage.lock().unwrap().insert(key, value);
                 }
+                RedisRequest::Del { key } => {
+                    self.storage.lock().unwrap().remove(&key);
+                }
                 _ => todo!(),
             }
 

@@ -88,7 +88,7 @@ impl ReplicationMonitor {
             info!("replicating command: {command:?}");
 
             match command {
-                RedisRequest::Set { .. } => {
+                RedisRequest::Set { .. } | RedisRequest::Del { .. } => {
                     stream.write_all(&command.to_value().serialize()).await?;
                 }
                 _ => todo!("unexpected command to replicate: {command:?}"),
