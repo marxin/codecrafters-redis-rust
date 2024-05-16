@@ -127,7 +127,7 @@ impl TryFrom<RedisValue> for RedisRequest {
                     anyhow::bail!("REPLCONF arg must be string");
                 };
                 let value = array
-                    .get(1)
+                    .get(2)
                     .ok_or(anyhow::anyhow!("REPLCONF argument 2 expected"))?;
                 let RedisValue::String(value) = value else {
                     anyhow::bail!("REPLCONF arg must be string");
