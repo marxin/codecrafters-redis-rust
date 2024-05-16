@@ -3,7 +3,7 @@ use std::{
     net::SocketAddr,
     ops::Add,
     sync::{
-        atomic::{AtomicU64, AtomicUsize, Ordering},
+        atomic::{AtomicUsize, Ordering},
         Arc, Mutex,
     },
 };
@@ -100,6 +100,7 @@ impl ReplicationMonitor {
                 RedisRequest::ReplConf { .. } => {
                     stream.write_all(&command.to_value().serialize()).await?;
                     let reply = parser::parse_token(&mut stream).await.unwrap().0;
+                    info!("reply received: {reply:?}");
                     let command = RedisRequest::try_from(reply)?;
                     info!("replconf reply received: {command:?}");
                     let RedisRequest::ReplConf { value, .. } = command else {
