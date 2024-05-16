@@ -1,6 +1,6 @@
 use std::{
     collections::HashMap,
-    future::{self, pending},
+    future::{self},
     net::SocketAddr,
     sync::{Arc, Mutex},
 };
