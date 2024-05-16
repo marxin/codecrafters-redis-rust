@@ -1,7 +1,7 @@
 use std::{any, net::SocketAddr};
 
 use tokio::{
-    io::{AsyncWriteExt, BufReader},
+    io::{AsyncReadExt, AsyncWriteExt, BufReader},
     net::TcpStream,
 };
 use tracing::{debug, info};
@@ -68,6 +68,11 @@ impl RedisReplica {
         info!("PSYNC 2 sent");
         let reply = parser::parse_token(&mut stream).await.unwrap();
         info!("got reply for PSYNC: {:?}", reply.0);
+        // TODO: check arguments of FULLRESYNC
+
+        let mut buffer = vec![0u8; 32];
+        stream.read_exact(& mut buffer);
+        info!("read {buffer:?}");
 
         Ok(())
     }
