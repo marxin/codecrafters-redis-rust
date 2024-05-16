@@ -1,5 +1,6 @@
 use std::{
     collections::HashMap,
+    future::{self, pending},
     net::SocketAddr,
     sync::{Arc, Mutex},
 };
@@ -110,6 +111,8 @@ impl RedisReplica {
                 .write_all(&RedisValue::String("OK".to_string()).serialize())
                 .await?;
         }
+
+        future::pending::<()>().await;
 
         Ok(())
     }
