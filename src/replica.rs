@@ -66,9 +66,8 @@ impl RedisReplica {
         info!("got reply for PSYNC: {:?}", reply.0);
         // TODO: check arguments of FULLRESYNC
 
-        let mut buffer = vec![0u8; 32];
-        stream.read_exact(&mut buffer).await?;
-        info!("read {buffer:?}");
+        let reply = parser::parse_file(&mut stream).await.unwrap();
+        info!("got RDB file: {:?}", reply);
 
         Ok(())
     }

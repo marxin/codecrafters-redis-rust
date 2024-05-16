@@ -90,7 +90,7 @@ pub async fn parse_file(reader: &mut BufReader<TcpStream>) -> anyhow::Result<Red
     let mut read_bytes = 0;
     let length = next_part(reader, &mut read_bytes).await?.parse::<usize>()?;
     let value = read_n(reader, length).await?;
-    Ok(RedisValue::String(String::from_utf8(value)?))
+    Ok(RedisValue::File(value))
 }
 
 impl RedisValue {
@@ -106,6 +106,7 @@ impl RedisValue {
                 let mut buffer = Vec::new();
                 buffer.push(b'$');
                 buffer.extend(content.len().to_string().as_bytes());
+                buffer.extend(SEPARATOR_STRING.as_bytes());
                 buffer.extend(content);
                 buffer
             }

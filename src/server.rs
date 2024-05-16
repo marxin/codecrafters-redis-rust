@@ -67,18 +67,23 @@ impl ReplicationMonitor {
         stream
             .write_all(&RedisValue::String("OK".to_string()).serialize())
             .await?;
-        let token_result = parser::parse_token(&mut stream).await.unwrap();
-        debug!("parsed command: {token_result:?}");
+        let request = parser::parse_token(&mut stream).await.unwrap();
+        debug!("parsed request: {request:?}");
         stream
             .write_all(&RedisValue::String("OK".to_string()).serialize())
             .await?;
-        let token_result = parser::parse_token(&mut stream).await.unwrap();
-        debug!("parsed command: {token_result:?}");
+        let request = parser::parse_token(&mut stream).await.unwrap();
+        debug!("parsed request: {request:?}");
         stream
             .write_all(
                 &RedisValue::String(format!("FULLRESYNC {} 0", hex::encode(self.replication_id)))
                     .serialize(),
             )
+            .await?;
+
+        // sending empty RDB file now
+        stream
+            .write_all(&RedisValue::File(hex::decode(EMPTY_RDB)?).serialize())
             .await?;
 
         Ok(())
@@ -99,6 +104,8 @@ pub struct RedisServer {
     /// Key expiration related channel.
     expiration_tx: mpsc::Sender<(String, Instant)>,
 }
+
+const EMPTY_RDB: &str = "524544495330303131fa0972656469732d76657205372e322e30fa0a72656469732d62697473c040fa056374696d65c26d08bc65fa08757365642d6d656dc2b0c41000fa08616f662d62617365c000fff06e3bfec0ff5aa2";
 
 impl RedisServer {
     pub fn new() -> Self {
