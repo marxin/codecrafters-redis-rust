@@ -26,7 +26,7 @@ struct ReplicationMonitor {
     /// Receiver for operations that need to be replicated.
     broadcast_tx: broadcast::Sender<RedisRequest>,
     /// Replication monitor used for e.g. WAIT operation.
-    latest_repl_id: HashMap<SocketAddrV4, u64>,
+    latest_repl_id: Arc<Mutex<HashMap<SocketAddr, u64>>>,
     /// Total number of bytes of the writes operations.
     total_written_bytes: u64,
     /// Watch notifier about the confirmed command by replicas.
@@ -57,14 +57,18 @@ impl ReplicationMonitor {
         Self {
             replication_id: rand::random(),
             broadcast_tx,
-            latest_repl_id: HashMap::default(),
+            latest_repl_id: Arc::default(),
             total_written_bytes: 0,
             replicated_update_tx: replicated_update_channel.0,
             replicated_update_rx: replicated_update_channel.1,
         }
     }
 
-    async fn handle_replica(&self, mut stream: BufReader<TcpStream>) -> anyhow::Result<()> {
+    async fn handle_replica(
+        &self,
+        mut stream: BufReader<TcpStream>,
+        addr: SocketAddr,
+    ) -> anyhow::Result<()> {
         stream.write_all(&RedisValue::ok().serialize()).await?;
         let request = parser::parse_token(&mut stream).await.unwrap();
         debug!("parsed request: {request:?}");
@@ -82,6 +86,8 @@ impl ReplicationMonitor {
         stream
             .write_all(&RedisValue::File(hex::decode(EMPTY_RDB)?).serialize())
             .await?;
+
+        self.latest_repl_id.lock().unwrap().insert(addr, 0);
 
         // process replication channel here
         while let Ok(command) = self.broadcast_tx.subscribe().recv().await {
@@ -132,7 +138,7 @@ impl RedisServer {
         }
     }
 
-    async fn handle_connection(&self, stream: TcpStream) -> anyhow::Result<()> {
+    async fn handle_connection(&self, stream: TcpStream, addr: SocketAddr) -> anyhow::Result<()> {
         let mut stream = BufReader::new(stream);
 
         loop {
@@ -145,7 +151,7 @@ impl RedisServer {
                     anyhow::ensure!(arg == "listening-port");
                     info!("moving replication client to monitor: {value}");
                     self.repl_monitor
-                        .handle_replica(stream)
+                        .handle_replica(stream, addr)
                         .instrument(info_span!("replication"))
                         .await?;
                     return Ok(());
@@ -171,7 +177,7 @@ impl RedisServer {
             let server = server.clone();
             tokio::spawn(
                 async move {
-                    if let Err(err) = server.handle_connection(stream).await {
+                    if let Err(err) = server.handle_connection(stream, addr).await {
                         error!("handle connection failed: {err}");
                     }
                 }
@@ -230,7 +236,9 @@ impl RedisServer {
             ))),
             RedisRequest::ReplConf { .. } => anyhow::bail!("REPLCONF should not be handled here"),
             RedisRequest::Null => panic!("unexpected NULL command here"),
-            RedisRequest::Wait { replicas, timeout } => Ok(RedisResponse::Integer(0)),
+            RedisRequest::Wait { .. } => Ok(RedisResponse::Integer(
+                self.repl_monitor.latest_repl_id.lock().unwrap().len() as i64,
+            )),
         }
     }
 
