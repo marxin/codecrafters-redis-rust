@@ -184,6 +184,7 @@ impl RedisRequest {
                 ["SET", key.as_str(), value.as_str()][..].into()
             }
             RedisRequest::Del { key } => ["DEL", key][..].into(),
+            RedisRequest::ReplConf { arg, value } => ["REPLCONF", arg, value][..].into(),
             _ => todo!(),
         }
     }

@@ -1,6 +1,6 @@
 use std::{
     collections::HashMap,
-    net::{SocketAddr, SocketAddrV4},
+    net::SocketAddr,
     ops::Add,
     sync::{Arc, Mutex},
 };
@@ -96,6 +96,12 @@ impl ReplicationMonitor {
             match command {
                 RedisRequest::Set { .. } | RedisRequest::Del { .. } => {
                     stream.write_all(&command.to_value().serialize()).await?;
+                }
+                RedisRequest::ReplConf { .. } => {
+                    stream.write_all(&command.to_value().serialize()).await?;
+                    let reply = parser::parse_token(&mut stream).await.unwrap().0;
+                    let command = RedisRequest::try_from(reply)?;
+                    info!("replconf reply received: {command:?}");
                 }
                 _ => todo!("unexpected command to replicate: {command:?}"),
             }
@@ -236,9 +242,17 @@ impl RedisServer {
             ))),
             RedisRequest::ReplConf { .. } => anyhow::bail!("REPLCONF should not be handled here"),
             RedisRequest::Null => panic!("unexpected NULL command here"),
-            RedisRequest::Wait { .. } => Ok(RedisResponse::Integer(
-                self.repl_monitor.latest_repl_id.lock().unwrap().len() as i64,
-            )),
+            RedisRequest::Wait { .. } => {
+                self.repl_monitor
+                    .broadcast_tx
+                    .send(RedisRequest::ReplConf {
+                        arg: "GETACK".to_string(),
+                        value: "*".to_string(),
+                    })?;
+                Ok(RedisResponse::Integer(
+                    self.repl_monitor.latest_repl_id.lock().unwrap().len() as i64,
+                ))
+            }
         }
     }
 

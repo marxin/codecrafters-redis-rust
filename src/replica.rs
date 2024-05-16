@@ -5,7 +5,6 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use anyhow::anyhow;
 use tokio::{
     io::{AsyncWriteExt, BufReader},
     net::{TcpListener, TcpStream},
@@ -95,6 +94,7 @@ impl RedisReplica {
                     anyhow::ensure!(arg == "GETACK" && value == "*");
                     let reply: RedisValue =
                         ["REPLCONF", "ACK", &replicated_bytes.to_string()][..].into();
+                    info!("sending reply: {reply:?}");
                     stream.write_all(&reply.serialize()).await?;
                 }
                 RedisRequest::Ping => {}
