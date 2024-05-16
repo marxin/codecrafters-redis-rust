@@ -1,4 +1,5 @@
 use anyhow::Context;
+use bytes::buf;
 use tokio::{
     io::{AsyncBufReadExt, AsyncReadExt, BufReader},
     net::TcpStream,
@@ -12,6 +13,7 @@ pub enum RedisValue {
     String(String),
     File(Vec<u8>),
     Array(Vec<RedisValue>),
+    Integer(i64),
     None,
 }
 
@@ -81,6 +83,10 @@ pub async fn parse_token(reader: &mut BufReader<TcpStream>) -> anyhow::Result<(R
             RedisValue::String(next_part(reader, &mut read_bytes).await?),
             read_bytes,
         )),
+        b':' => {
+            let number = next_part(reader, &mut read_bytes).await?.parse::<i64>()?;
+            Ok((RedisValue::Integer(number), read_bytes))
+        }
         _ => anyhow::bail!(format!(
             "Unsupported leading character: '0x{:x}'",
             start_letter
@@ -127,6 +133,13 @@ impl RedisValue {
                 buffer.extend(length.to_string().as_bytes());
                 buffer.extend(SEPARATOR_STRING.as_bytes());
                 buffer.extend(content);
+                buffer
+            }
+            RedisValue::Integer(number) => {
+                let mut buffer = Vec::new();
+                buffer.push(b':');
+                buffer.extend(number.to_string().as_bytes());
+                buffer.extend(SEPARATOR_STRING.as_bytes());
                 buffer
             }
             RedisValue::None => format!("$-1{SEPARATOR_STRING}").as_bytes().to_vec(),

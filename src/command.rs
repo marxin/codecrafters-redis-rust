@@ -37,6 +37,7 @@ pub enum RedisRequest {
 pub enum RedisResponse {
     Null,
     String(String),
+    Integer(i64),
 }
 
 impl TryFrom<RedisValue> for RedisRequest {
@@ -170,6 +171,7 @@ impl RedisResponse {
         let response = match self {
             RedisResponse::Null => RedisValue::None,
             RedisResponse::String(arg) => RedisValue::String(arg.to_owned()),
+            RedisResponse::Integer(number) => RedisValue::Integer(*number),
         };
         response.serialize()
     }
