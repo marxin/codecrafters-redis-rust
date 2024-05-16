@@ -106,7 +106,7 @@ impl ReplicationMonitor {
                     info!("replconf reply received: {command:?}");
                     let RedisRequest::ReplConf { value, .. } = command else {
                         warn!("replconf expect a valid reply");
-                        break;
+                        continue;
                     };
                     let replicated_counter = value.parse::<u64>()?;
                     let mut latest_repl_id = self.latest_repl_id.lock().unwrap();
