@@ -22,11 +22,7 @@ impl RedisReplica {
         let mut stream = BufReader::new(TcpStream::connect(self.replicaof).await?);
 
         stream
-            .write_all(
-                RedisValue::Array(vec![RedisValue::String("ping".to_string())])
-                    .serialize()
-                    .as_bytes(),
-            )
+            .write_all(&RedisValue::Array(vec![RedisValue::String("ping".to_string())]).serialize())
             .await?;
         info!("PING sent");
         let reply = parser::parse_token(&mut stream).await.unwrap();
@@ -42,7 +38,7 @@ impl RedisReplica {
             .map(RedisValue::String)
             .collect(),
         );
-        stream.write_all(request.serialize().as_bytes()).await?;
+        stream.write_all(&request.serialize()).await?;
         info!("REPLCONF 1 sent");
         let reply = parser::parse_token(&mut stream).await.unwrap();
         anyhow::ensure!(reply.0 == RedisValue::String("OK".to_string()));
@@ -53,7 +49,7 @@ impl RedisReplica {
                 .map(|v| RedisValue::String(v.to_string()))
                 .collect(),
         );
-        stream.write_all(request.serialize().as_bytes()).await?;
+        stream.write_all(&request.serialize()).await?;
         info!("REPLCONF 2 sent");
         let reply = parser::parse_token(&mut stream).await.unwrap();
         anyhow::ensure!(reply.0 == RedisValue::String("OK".to_string()));
@@ -64,14 +60,14 @@ impl RedisReplica {
                 .map(|v| RedisValue::String(v.to_string()))
                 .collect(),
         );
-        stream.write_all(request.serialize().as_bytes()).await?;
+        stream.write_all(&request.serialize()).await?;
         info!("PSYNC 2 sent");
         let reply = parser::parse_token(&mut stream).await.unwrap();
         info!("got reply for PSYNC: {:?}", reply.0);
         // TODO: check arguments of FULLRESYNC
 
         let mut buffer = vec![0u8; 32];
-        stream.read_exact(& mut buffer).await?;
+        stream.read_exact(&mut buffer).await?;
         info!("read {buffer:?}");
 
         Ok(())

@@ -143,7 +143,7 @@ impl TryFrom<RedisValue> for RedisRequest {
 }
 
 impl RedisResponse {
-    pub fn serialize(&self) -> String {
+    pub fn serialize(&self) -> Vec<u8> {
         let response = match self {
             RedisResponse::Null => RedisValue::None,
             RedisResponse::String(arg) => RedisValue::String(arg.to_owned()),

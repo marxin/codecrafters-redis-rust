@@ -1,4 +1,5 @@
 use anyhow::Context;
+use bytes::buf;
 use tokio::{
     io::{AsyncBufReadExt, AsyncReadExt, BufReader},
     net::TcpStream,
@@ -10,6 +11,7 @@ const SEPARATOR_STRING: &str = "\r\n";
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RedisValue {
     String(String),
+    File(Vec<u8>),
     Array(Vec<RedisValue>),
     None,
 }
@@ -81,25 +83,46 @@ pub async fn parse_token(reader: &mut BufReader<TcpStream>) -> anyhow::Result<(R
     }
 }
 
+pub async fn parse_file(reader: &mut BufReader<TcpStream>) -> anyhow::Result<RedisValue> {
+    let start_letter = next_char(reader).await?;
+    anyhow::ensure!(start_letter == b'$');
+
+    let mut read_bytes = 0;
+    let length = next_part(reader, &mut read_bytes).await?.parse::<usize>()?;
+    let value = read_n(reader, length).await?;
+    Ok(RedisValue::String(String::from_utf8(value)?))
+}
+
 impl RedisValue {
-    pub fn serialize(&self) -> String {
+    pub fn serialize(&self) -> Vec<u8> {
         match self {
-            RedisValue::String(value) => {
-                format!(
-                    "${}{SEPARATOR_STRING}{value}{SEPARATOR_STRING}",
-                    value.len()
-                )
+            RedisValue::String(value) => format!(
+                "${}{SEPARATOR_STRING}{value}{SEPARATOR_STRING}",
+                value.len()
+            )
+            .as_bytes()
+            .to_vec(),
+            RedisValue::File(content) => {
+                let mut buffer = Vec::new();
+                buffer.push(b'$');
+                buffer.extend(content.len().to_string().as_bytes());
+                buffer.extend(content);
+                buffer
             }
             RedisValue::Array(array) => {
                 let length = array.len();
-                let content = array
+                let mut content = array
                     .iter()
                     .map(|v| v.serialize())
                     .collect::<Vec<_>>()
-                    .join("");
-                format!("*{length}{SEPARATOR_STRING}{content}")
+                    .concat();
+                let mut buffer = Vec::new();
+                buffer.push(b'*');
+                buffer.extend(SEPARATOR_STRING.as_bytes());
+                buffer.extend(content);
+                buffer
             }
-            RedisValue::None => format!("$-1{SEPARATOR_STRING}"),
+            RedisValue::None => format!("$-1{SEPARATOR_STRING}").as_bytes().to_vec(),
         }
     }
 }

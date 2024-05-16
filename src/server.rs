@@ -21,6 +21,8 @@ use crate::{
 
 #[derive(Debug)]
 struct ReplicationMonitor {
+    replication_id: [u8; 20],
+
     /// Receiver for operations that need to be replicated.
     broadcast_rx: broadcast::Receiver<RedisRequest>,
     /// Replication monitor used for e.g. WAIT operation.
@@ -52,6 +54,7 @@ impl ReplicationMonitor {
         let replicated_update_channel = watch::channel(Vec::new());
 
         Self {
+            replication_id: rand::random(),
             broadcast_rx,
             latest_repl_id: HashMap::default(),
             total_written_bytes: 0,
@@ -62,17 +65,20 @@ impl ReplicationMonitor {
 
     async fn handle_replica(&self, mut stream: BufReader<TcpStream>) -> anyhow::Result<()> {
         stream
-            .write_all(RedisValue::String("OK".to_string()).serialize().as_bytes())
+            .write_all(&RedisValue::String("OK".to_string()).serialize())
             .await?;
         let token_result = parser::parse_token(&mut stream).await.unwrap();
         debug!("parsed command: {token_result:?}");
         stream
-            .write_all(RedisValue::String("OK".to_string()).serialize().as_bytes())
+            .write_all(&RedisValue::String("OK".to_string()).serialize())
             .await?;
         let token_result = parser::parse_token(&mut stream).await.unwrap();
         debug!("parsed command: {token_result:?}");
         stream
-            .write_all(RedisValue::String("OK".to_string()).serialize().as_bytes())
+            .write_all(
+                &RedisValue::String(format!("FULLRESYNC {} 0", hex::encode(self.replication_id)))
+                    .serialize(),
+            )
             .await?;
 
         Ok(())
@@ -85,8 +91,6 @@ type Storage = Arc<Mutex<HashMap<String, String>>>;
 pub struct RedisServer {
     /// Key-value storage of the server.
     storage: Storage,
-
-    replication_id: [u8; 20],
 
     /// Replication-related fields.
     repl_tx: mpsc::Sender<RedisRequest>,
@@ -110,7 +114,6 @@ impl RedisServer {
             expiration_tx: exp_tx,
             repl_monitor: ReplicationMonitor::new(repl_rx),
             repl_tx: repl_tx.clone(),
-            replication_id: rand::random(),
         }
     }
 
@@ -133,7 +136,7 @@ impl RedisServer {
                     let response = self.run(command).await?;
                     debug!("sending reply: {response:?}");
                     // TODO
-                    stream.write_all(response.serialize().as_bytes()).await?;
+                    stream.write_all(&response.serialize()).await?;
                 }
             }
         }
@@ -205,7 +208,7 @@ impl RedisServer {
             }
             RedisRequest::Info => Ok(RedisResponse::String(format!(
                 "role:master\nmaster_replid:{}\nmaster_repl_offset:0\n",
-                hex::encode(self.replication_id)
+                hex::encode(self.repl_monitor.replication_id)
             ))),
             RedisRequest::ReplConf { .. } => anyhow::bail!("REPLCONF should not be handled here"),
             RedisRequest::Null => panic!("unexpected NULL command here"),
