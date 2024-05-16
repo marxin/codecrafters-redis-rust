@@ -67,7 +67,7 @@ impl RedisReplica {
         stream.write_all(request.serialize().as_bytes()).await?;
         info!("PSYNC 2 sent");
         let reply = parser::parse_token(&mut stream).await.unwrap();
-        debug!("got reply for PSYNC: {:?}", reply.0);
+        info!("got reply for PSYNC: {:?}", reply.0);
 
         Ok(())
     }
