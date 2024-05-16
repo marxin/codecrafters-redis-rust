@@ -38,25 +38,10 @@ struct ReplicationMonitor {
 }
 
 impl ReplicationMonitor {
-    fn new(mut repl_rx: mpsc::Receiver<RedisRequest>) -> Self {
+    fn new() -> Self {
         // TODO: factor out capacity
         let (broadcast_tx, _) = broadcast::channel(16);
-
         let total_written_bytes: Arc<AtomicUsize> = Arc::default();
-        let btx = broadcast_tx.clone();
-        let counter = total_written_bytes.clone();
-        tokio::spawn(
-            async move {
-                loop {
-                    let rep = repl_rx.recv().await.unwrap();
-                    debug!("replicating command: {rep:?}");
-                    counter.fetch_add(rep.to_value().serialize().len(), Ordering::Relaxed);
-                    btx.send(rep.clone()).unwrap();
-                }
-            }
-            .instrument(info_span!("replication manager")),
-        );
-
         let replicated_update_channel = watch::channel(Vec::new());
 
         Self {
@@ -67,6 +52,18 @@ impl ReplicationMonitor {
             replicated_update_tx: replicated_update_channel.0,
             replicated_update_rx: replicated_update_channel.1,
         }
+    }
+
+    pub fn replicate_command(&self, command: RedisRequest) -> anyhow::Result<()> {
+        let _span = info_span!("replicationg_manager").entered();
+        self.broadcast_tx.send(command.clone())?;
+        self.total_written_bytes
+            .fetch_add(command.to_value().serialize().len(), Ordering::Relaxed);
+        info!(
+            "replicated: {command:?}, counter: {}",
+            self.total_written_bytes.load(Ordering::Relaxed)
+        );
+        Ok(())
     }
 
     async fn handle_replica(
@@ -96,8 +93,6 @@ impl ReplicationMonitor {
 
         // process replication channel here
         while let Ok(command) = self.broadcast_tx.subscribe().recv().await {
-            info!("replicating command: {command:?}");
-
             match command {
                 RedisRequest::Set { .. } | RedisRequest::Del { .. } => {
                     stream.write_all(&command.to_value().serialize()).await?;
@@ -107,6 +102,14 @@ impl ReplicationMonitor {
                     let reply = parser::parse_token(&mut stream).await.unwrap().0;
                     let command = RedisRequest::try_from(reply)?;
                     info!("replconf reply received: {command:?}");
+                    let RedisRequest::ReplConf { value, .. } = command else {
+                        anyhow::bail!("replconf expected");
+                    };
+                    let replicated_counter = value.parse::<u64>()?;
+                    let mut latest_repl_id = self.latest_repl_id.lock().unwrap();
+                    latest_repl_id.insert(addr, replicated_counter);
+                    let replications: Vec<_> = latest_repl_id.values().cloned().collect();
+                    self.replicated_update_tx.send(replications)?;
                 }
                 _ => todo!("unexpected command to replicate: {command:?}"),
             }
@@ -123,8 +126,7 @@ pub struct RedisServer {
     storage: Storage,
 
     /// Replication-related fields.
-    repl_tx: mpsc::Sender<RedisRequest>,
-    repl_monitor: ReplicationMonitor,
+    repl_monitor: Arc<ReplicationMonitor>,
 
     /// Key expiration related channel.
     expiration_tx: mpsc::Sender<(String, Instant)>,
@@ -135,17 +137,16 @@ const EMPTY_RDB: &str = "524544495330303131fa0972656469732d76657205372e322e30fa0
 impl RedisServer {
     pub fn new() -> Self {
         let (exp_tx, exp_rx) = mpsc::channel::<(String, Instant)>(16);
-        let (repl_tx, repl_rx) = mpsc::channel(16);
         let storage: Storage = Arc::default();
+        let repl_monitor = Arc::new(ReplicationMonitor::new());
 
         // Start the expiration thread
-        RedisServer::start_expiration_thread(storage.clone(), exp_rx, repl_tx.clone());
+        RedisServer::start_expiration_thread(storage.clone(), exp_rx, repl_monitor.clone());
 
         Self {
             storage,
             expiration_tx: exp_tx,
-            repl_monitor: ReplicationMonitor::new(repl_rx),
-            repl_tx: repl_tx.clone(),
+            repl_monitor,
         }
     }
 
@@ -224,18 +225,12 @@ impl RedisServer {
                     value,
                     expiration: None,
                 };
-                self.repl_tx.send(cmd.clone()).await?;
-                self.repl_monitor
-                    .total_written_bytes
-                    .fetch_add(cmd.to_value().serialize().len(), Ordering::Relaxed);
+                self.repl_monitor.replicate_command(cmd)?;
                 Ok(RedisResponse::String("OK".to_string()))
             }
             RedisRequest::Del { key } => {
                 let cmd = RedisRequest::Del { key: key.clone() };
-                self.repl_tx.send(cmd.clone()).await?;
-                self.repl_monitor
-                    .total_written_bytes
-                    .fetch_add(cmd.to_value().serialize().len(), Ordering::Relaxed);
+                self.repl_monitor.replicate_command(cmd)?;
                 Ok(RedisResponse::String(
                     self.storage
                         .lock()
@@ -251,7 +246,7 @@ impl RedisServer {
             ))),
             RedisRequest::ReplConf { .. } => anyhow::bail!("REPLCONF should not be handled here"),
             RedisRequest::Null => panic!("unexpected NULL command here"),
-            RedisRequest::Wait { .. } => {
+            RedisRequest::Wait { replicas, timeout } => {
                 let written_bytes = self
                     .repl_monitor
                     .total_written_bytes
@@ -262,13 +257,23 @@ impl RedisServer {
                     arg: "GETACK".to_string(),
                     value: "*".to_string(),
                 };
-                self.repl_monitor.broadcast_tx.send(cmd.clone())?;
-                self.repl_monitor
-                    .total_written_bytes
-                    .fetch_add(cmd.to_value().serialize().len(), Ordering::Relaxed);
-                Ok(RedisResponse::Integer(
-                    self.repl_monitor.latest_repl_id.lock().unwrap().len() as i64,
-                ))
+                self.repl_monitor.replicate_command(cmd)?;
+
+                let sleep_handle = tokio::time::sleep(timeout);
+                let mut receiver = self.repl_monitor.replicated_update_rx.clone();
+
+                let count_fn = |v: &Vec<u64>| v.iter().filter(|&&x| x >= replicas).count() as u64;
+                let reply: RedisResponse = tokio::select! {
+                    _ = sleep_handle => {
+                        RedisResponse::Integer(self.repl_monitor.latest_repl_id.lock().unwrap().values().filter(|&&x| x >= replicas).count() as i64)
+                    },
+                    values = receiver.wait_for(|v| count_fn(v) >= replicas) => {
+                        let replicated_times = count_fn(&values.unwrap());
+                        RedisResponse::Integer(replicated_times as i64)
+                    }
+                };
+
+                Ok(reply)
             }
         }
     }
@@ -276,7 +281,7 @@ impl RedisServer {
     fn start_expiration_thread(
         storage: Storage,
         mut exp_rx: mpsc::Receiver<(String, Instant)>,
-        repl_tx: mpsc::Sender<RedisRequest>,
+        repl_monitor: Arc<ReplicationMonitor>,
     ) {
         tokio::spawn(
             async move {
@@ -304,8 +309,7 @@ impl RedisServer {
                             key = set.join_next() => {
                                 let key = key.unwrap().unwrap();
                                 let _ = storage.lock().unwrap().remove(&key);
-                                // TODO
-                                repl_tx.send(RedisRequest::Del { key: key.clone() }).await.unwrap();
+                                repl_monitor.replicate_command(RedisRequest::Del { key: key.clone() }).unwrap();
                                 debug!("removed {key}");
                             }
                         }
