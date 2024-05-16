@@ -2,7 +2,7 @@ use std::{
     collections::HashMap,
     net::{SocketAddr, SocketAddrV4},
     ops::Add,
-    sync::{Arc, Mutex}, thread::sleep, time::Duration,
+    sync::{Arc, Mutex},
 };
 
 use tokio::{
@@ -24,7 +24,7 @@ struct ReplicationMonitor {
     replication_id: [u8; 20],
 
     /// Receiver for operations that need to be replicated.
-    broadcast_rx: broadcast::Receiver<RedisRequest>,
+    broadcast_tx: broadcast::Sender<RedisRequest>,
     /// Replication monitor used for e.g. WAIT operation.
     latest_repl_id: HashMap<SocketAddrV4, u64>,
     /// Total number of bytes of the writes operations.
@@ -37,15 +37,16 @@ struct ReplicationMonitor {
 impl ReplicationMonitor {
     fn new(mut repl_rx: mpsc::Receiver<RedisRequest>) -> Self {
         // TODO: factor out capacity
-        let (broadcast_tx, broadcast_rx) = broadcast::channel(16);
+        let (broadcast_tx, _) = broadcast::channel(16);
 
+        let btx = broadcast_tx.clone();
         tokio::spawn(
             async move {
                 loop {
                     let rep = repl_rx.recv().await.unwrap();
                     debug!("replicating command: {rep:?}");
                     // TODO
-                    broadcast_tx.send(rep).unwrap();
+                    btx.send(rep).unwrap();
                 }
             }
             .instrument(info_span!("replication manager")),
@@ -55,7 +56,7 @@ impl ReplicationMonitor {
 
         Self {
             replication_id: rand::random(),
-            broadcast_rx,
+            broadcast_tx,
             latest_repl_id: HashMap::default(),
             total_written_bytes: 0,
             replicated_update_tx: replicated_update_channel.0,
@@ -87,8 +88,16 @@ impl ReplicationMonitor {
             .await?;
 
         // process replication channel here
-        sleep(Duration::from_secs(100));
+        while let Ok(command) = self.broadcast_tx.subscribe().recv().await {
+            info!("replicating command: {command:?}");
 
+            match command {
+                RedisRequest::Set { .. } => {
+                    stream.write_all(&command.to_value().serialize()).await?;
+                }
+                _ => todo!("unexpected command to replicate: {command:?}"),
+            }
+        }
         Ok(())
     }
 }
@@ -139,7 +148,10 @@ impl RedisServer {
                 RedisRequest::ReplConf { arg, value } => {
                     anyhow::ensure!(arg == "listening-port");
                     info!("moving replication client to monitor: {value}");
-                    self.repl_monitor.handle_replica(stream).await?;
+                    self.repl_monitor
+                        .handle_replica(stream)
+                        .instrument(info_span!("replication"))
+                        .await?;
                     return Ok(());
                 }
                 _ => {

@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use clap::Parser;
 use replica::RedisReplica;
+use tracing::{info_span, Instrument};
 
 use crate::server::RedisServer;
 
@@ -38,7 +39,10 @@ async fn main() -> anyhow::Result<()> {
                 "could not parse --replicaof address: {replica}"
             ))?;
         let replica = RedisReplica::new(replica_addr);
-        replica.start_replication(addr).await
+        replica
+            .start_replication(addr)
+            .instrument(info_span!("replication"))
+            .await
     } else {
         let server = Arc::new(RedisServer::new());
         RedisServer::start_server(server, addr).await

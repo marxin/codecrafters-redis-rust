@@ -91,15 +91,21 @@ impl RedisReplica {
 
         let storage = self.storage.clone();
         tokio::spawn(async move {
-            Self::start_server(storage, addr).await;
+            Self::start_server(storage, addr).await.unwrap();
         });
 
         loop {
             let token_result = parser::parse_token(&mut stream).await.unwrap();
-            info!("parsed command: {token_result:?}");
-            if matches!(token_result.0, RedisValue::None) {
-                break;
+            let command = RedisRequest::try_from(token_result.0)?;
+            info!("parsed command: {command:?}");
+            match command {
+                RedisRequest::Null => break,
+                RedisRequest::Set { key, value, .. } => {
+                    self.storage.lock().unwrap().insert(key, value);
+                }
+                _ => todo!(),
             }
+
             stream
                 .write_all(&RedisValue::String("OK".to_string()).serialize())
                 .await?;
@@ -108,12 +114,12 @@ impl RedisReplica {
         Ok(())
     }
 
-    async fn handle_connection(stream: TcpStream) -> anyhow::Result<()> {
+    async fn handle_connection(storage: Storage, stream: TcpStream) -> anyhow::Result<()> {
         let mut stream = BufReader::new(stream);
 
         loop {
             let query = parser::parse_token(&mut stream).await.unwrap();
-            debug!("parsed request: {query:?}");
+            debug!("parsed command: {query:?}");
             let command = RedisRequest::try_from(query.0)?;
 
             let reply = match command {
@@ -121,7 +127,11 @@ impl RedisReplica {
                     break;
                 }
                 RedisRequest::Ping => RedisResponse::String("PONG".to_string()),
-                _ => todo!("unsupported request: {command:?}"),
+                RedisRequest::Get { key } => storage.lock().unwrap().get(&key).map_or_else(
+                    || RedisResponse::Null,
+                    |value| RedisResponse::String(value.clone()),
+                ),
+                _ => todo!("unsupported command: {command:?}"),
             };
 
             stream.write_all(&reply.serialize()).await?;
@@ -139,8 +149,7 @@ impl RedisReplica {
             let storage = storage.clone();
             tokio::spawn(
                 async move {
-                    // TODO
-                    Self::handle_connection(stream).await;
+                    Self::handle_connection(storage, stream).await.unwrap();
                 }
                 .instrument(info_span!("connection", addr = %addr)),
             );
