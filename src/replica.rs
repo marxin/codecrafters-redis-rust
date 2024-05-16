@@ -43,38 +43,20 @@ impl RedisReplica {
         let reply = parser::parse_token(&mut stream).await.unwrap();
         anyhow::ensure!(reply.0 == RedisValue::String("PONG".to_string()));
 
-        let request = RedisValue::Array(
-            vec![
-                "replconf".to_string(),
-                "listening-port".to_string(),
-                addr.port().to_string(),
-            ]
-            .into_iter()
-            .map(RedisValue::String)
-            .collect(),
-        );
+        let request: RedisValue =
+            ["replconf", "listening-port", &addr.port().to_string()][..].into();
         stream.write_all(&request.serialize()).await?;
         info!("REPLCONF 1 sent");
         let reply = parser::parse_token(&mut stream).await.unwrap();
-        anyhow::ensure!(reply.0 == RedisValue::String("OK".to_string()));
+        anyhow::ensure!(reply.0 == RedisValue::ok());
 
-        let request = RedisValue::Array(
-            ["replconf", "capa", "psync2"]
-                .iter()
-                .map(|v| RedisValue::String(v.to_string()))
-                .collect(),
-        );
+        let request: RedisValue = ["replconf", "capa", "psync2"][..].into();
         stream.write_all(&request.serialize()).await?;
         info!("REPLCONF 2 sent");
         let reply = parser::parse_token(&mut stream).await.unwrap();
-        anyhow::ensure!(reply.0 == RedisValue::String("OK".to_string()));
+        anyhow::ensure!(reply.0 == RedisValue::ok());
 
-        let request = RedisValue::Array(
-            ["psync", "?", "-1"]
-                .iter()
-                .map(|v| RedisValue::String(v.to_string()))
-                .collect(),
-        );
+        let request: RedisValue = ["psync", "?", "-1"][..].into();
         stream.write_all(&request.serialize()).await?;
         info!("PSYNC 2 sent");
         let reply = parser::parse_token(&mut stream).await.unwrap();
@@ -107,9 +89,7 @@ impl RedisReplica {
                 _ => todo!(),
             }
 
-            stream
-                .write_all(&RedisValue::String("OK".to_string()).serialize())
-                .await?;
+            stream.write_all(&RedisValue::ok().serialize()).await?;
         }
 
         future::pending::<()>().await;

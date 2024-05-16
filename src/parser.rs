@@ -15,6 +15,12 @@ pub enum RedisValue {
     None,
 }
 
+impl RedisValue {
+    pub fn ok() -> Self {
+        "OK".into()
+    }
+}
+
 async fn read_n(reader: &mut BufReader<TcpStream>, n: usize) -> anyhow::Result<Vec<u8>> {
     let mut buffer = vec![0u8; n];
     reader
@@ -125,5 +131,17 @@ impl RedisValue {
             }
             RedisValue::None => format!("$-1{SEPARATOR_STRING}").as_bytes().to_vec(),
         }
+    }
+}
+
+impl From<&str> for RedisValue {
+    fn from(value: &str) -> Self {
+        Self::String(value.to_string())
+    }
+}
+
+impl From<&[&str]> for RedisValue {
+    fn from(values: &[&str]) -> Self {
+        RedisValue::Array(values.iter().map(|&v| v.into()).collect())
     }
 }

@@ -155,11 +155,9 @@ impl RedisResponse {
 impl RedisRequest {
     pub fn to_value(&self) -> RedisValue {
         match self {
-            RedisRequest::Set { key, value, .. } => RedisValue::Array(vec![
-                RedisValue::String("SET".to_string()),
-                RedisValue::String(key.clone()),
-                RedisValue::String(value.clone()),
-            ]),
+            RedisRequest::Set { key, value, .. } => {
+                ["SET", key.as_str(), value.as_str()][..].into()
+            }
             _ => todo!(),
         }
     }

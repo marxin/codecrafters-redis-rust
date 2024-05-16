@@ -65,14 +65,10 @@ impl ReplicationMonitor {
     }
 
     async fn handle_replica(&self, mut stream: BufReader<TcpStream>) -> anyhow::Result<()> {
-        stream
-            .write_all(&RedisValue::String("OK".to_string()).serialize())
-            .await?;
+        stream.write_all(&RedisValue::ok().serialize()).await?;
         let request = parser::parse_token(&mut stream).await.unwrap();
         debug!("parsed request: {request:?}");
-        stream
-            .write_all(&RedisValue::String("OK".to_string()).serialize())
-            .await?;
+        stream.write_all(&RedisValue::ok().serialize()).await?;
         let request = parser::parse_token(&mut stream).await.unwrap();
         debug!("parsed request: {request:?}");
         stream
