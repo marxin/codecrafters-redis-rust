@@ -70,6 +70,10 @@ pub async fn parse_token(reader: &mut BufReader<TcpStream>) -> anyhow::Result<(R
             }
             Ok((RedisValue::Array(elements), read_bytes))
         }
+        b'+' => Ok((
+            RedisValue::String(next_part(reader, &mut read_bytes).await?),
+            read_bytes,
+        )),
         _ => anyhow::bail!(format!(
             "Unsupported leading character: '0x{:x}'",
             start_letter

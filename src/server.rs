@@ -61,13 +61,19 @@ impl ReplicationMonitor {
     }
 
     async fn handle_replica(&self, mut stream: BufReader<TcpStream>) -> anyhow::Result<()> {
-        stream.write_all(RedisValue::String("OK".to_string()).serialize().as_bytes()).await?;
+        stream
+            .write_all(RedisValue::String("OK".to_string()).serialize().as_bytes())
+            .await?;
         let token_result = parser::parse_token(&mut stream).await.unwrap();
         debug!("parsed command: {token_result:?}");
-        stream.write_all(RedisValue::String("OK".to_string()).serialize().as_bytes()).await?;
+        stream
+            .write_all(RedisValue::String("OK".to_string()).serialize().as_bytes())
+            .await?;
         let token_result = parser::parse_token(&mut stream).await.unwrap();
         debug!("parsed command: {token_result:?}");
-        stream.write_all(RedisValue::String("OK".to_string()).serialize().as_bytes()).await?;
+        stream
+            .write_all(RedisValue::String("OK".to_string()).serialize().as_bytes())
+            .await?;
 
         Ok(())
     }
@@ -121,8 +127,8 @@ impl RedisServer {
                     anyhow::ensure!(arg == "listening-port");
                     info!("moving replication client to monitor");
                     self.repl_monitor.handle_replica(stream).await?;
-                    return Ok(())
-                },
+                    return Ok(());
+                }
                 _ => {
                     let response = self.run(command).await?;
                     debug!("sending reply: {response:?}");
@@ -247,5 +253,5 @@ impl RedisServer {
             }
             .instrument(info_span!("expiration handler")),
         );
-    }    
+    }
 }

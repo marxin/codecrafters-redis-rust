@@ -118,7 +118,7 @@ impl TryFrom<RedisValue> for RedisRequest {
                 };
                 anyhow::ensure!(detail == "replication");
                 Ok(RedisRequest::Info)
-            },
+            }
             "replconf" => {
                 let arg = array
                     .get(1)
@@ -132,7 +132,10 @@ impl TryFrom<RedisValue> for RedisRequest {
                 let RedisValue::String(value) = value else {
                     anyhow::bail!("REPLCONF arg must be string");
                 };
-                Ok(RedisRequest::ReplConf { arg: arg.clone(), value: value.to_string() })
+                Ok(RedisRequest::ReplConf {
+                    arg: arg.clone(),
+                    value: value.to_string(),
+                })
             }
             command => anyhow::bail!("Unknown command: {command}"),
         }
