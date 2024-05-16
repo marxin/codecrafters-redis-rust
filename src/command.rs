@@ -27,6 +27,10 @@ pub enum RedisRequest {
         arg: String,
         value: String,
     },
+    Wait {
+        replicas: u64,
+        timeout: Duration,
+    },
 }
 
 #[derive(Debug)]
@@ -135,6 +139,25 @@ impl TryFrom<RedisValue> for RedisRequest {
                 Ok(RedisRequest::ReplConf {
                     arg: arg.clone(),
                     value: value.to_string(),
+                })
+            }
+            "wait" => {
+                let replicas = array
+                    .get(1)
+                    .ok_or(anyhow::anyhow!("WAIT argument 1 expected"))?;
+                let RedisValue::String(replicas) = replicas else {
+                    anyhow::bail!("WAIT arg must be string");
+                };
+                let timeout = array
+                    .get(2)
+                    .ok_or(anyhow::anyhow!("WAIT argument 2 expected"))?;
+                let RedisValue::String(timeout) = timeout else {
+                    anyhow::bail!("WAIT arg must be string");
+                };
+
+                Ok(RedisRequest::Wait {
+                    replicas: replicas.parse().unwrap(),
+                    timeout: Duration::from_millis(timeout.parse().unwrap()),
                 })
             }
             command => anyhow::bail!("Unknown command: {command}"),

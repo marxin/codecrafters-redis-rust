@@ -230,6 +230,7 @@ impl RedisServer {
             ))),
             RedisRequest::ReplConf { .. } => anyhow::bail!("REPLCONF should not be handled here"),
             RedisRequest::Null => panic!("unexpected NULL command here"),
+            RedisRequest::Wait { replicas, timeout } => Ok(RedisResponse::String("0".to_string())),
         }
     }
 
