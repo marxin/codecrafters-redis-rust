@@ -87,21 +87,21 @@ impl RedisReplica {
                 RedisRequest::Null => break,
                 RedisRequest::Set { key, value, .. } => {
                     self.storage.lock().unwrap().insert(key, value);
-                    replicated_bytes += token_size;
                 }
                 RedisRequest::Del { key } => {
                     self.storage.lock().unwrap().remove(&key);
-                    replicated_bytes += token_size;
                 }
                 RedisRequest::ReplConf { arg, value } => {
                     anyhow::ensure!(arg == "GETACK" && value == "*");
                     let reply: RedisValue =
                         ["REPLCONF", "ACK", &replicated_bytes.to_string()][..].into();
                     stream.write_all(&reply.serialize()).await?;
-                    replicated_bytes += token_size;
                 }
+                RedisRequest::Ping => {}
                 _ => todo!(),
             }
+
+            replicated_bytes += token_size;
         }
 
         future::pending::<()>().await;
