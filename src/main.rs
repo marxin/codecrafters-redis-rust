@@ -1,4 +1,4 @@
-use std::net::{Ipv4Addr, SocketAddr};
+use std::net::{Ipv4Addr, SocketAddr, ToSocketAddrs};
 use std::str::FromStr;
 use std::sync::Arc;
 
@@ -31,7 +31,9 @@ async fn main() -> anyhow::Result<()> {
     let addr = SocketAddr::from((Ipv4Addr::LOCALHOST, args.port));
 
     if let Some(replica) = args.replicaof {
-        let replica = RedisReplica::new(SocketAddr::from_str(&replica.replace(' ', ":"))?);
+        let replica = replica.replace(' ', ":");
+        let replica_addr = replica.to_socket_addrs()?.find(|addr| matches!(addr, SocketAddr::V4(..))).ok_or(anyhow::anyhow!("could not parse --replicaof address: {replica}"))?;
+        let replica = RedisReplica::new(replica_addr);
         replica.start_server(addr).await
     } else {
         let server = Arc::new(RedisServer::new());
