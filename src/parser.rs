@@ -118,6 +118,7 @@ impl RedisValue {
                     .concat();
                 let mut buffer = Vec::new();
                 buffer.push(b'*');
+                buffer.extend(length.to_string().as_bytes());
                 buffer.extend(SEPARATOR_STRING.as_bytes());
                 buffer.extend(content);
                 buffer
