@@ -6,13 +6,13 @@ use std::{
 };
 
 use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt, BufReader},
+    io::{AsyncWriteExt, BufReader},
     net::{TcpListener, TcpStream},
     sync::{broadcast, mpsc, watch},
     task::JoinSet,
     time::Instant,
 };
-use tracing::{debug, error, info, info_span, warn, Instrument};
+use tracing::{debug, error, info, info_span, Instrument};
 
 use crate::{
     command::{RedisRequest, RedisResponse},
@@ -135,7 +135,7 @@ impl RedisServer {
                 RedisRequest::Null => break,
                 RedisRequest::ReplConf { arg, value } => {
                     anyhow::ensure!(arg == "listening-port");
-                    info!("moving replication client to monitor");
+                    info!("moving replication client to monitor: {value}");
                     self.repl_monitor.handle_replica(stream).await?;
                     return Ok(());
                 }

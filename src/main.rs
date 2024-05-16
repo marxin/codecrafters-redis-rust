@@ -1,5 +1,4 @@
 use std::net::{Ipv4Addr, SocketAddr, ToSocketAddrs};
-use std::str::FromStr;
 use std::sync::Arc;
 
 use clap::Parser;

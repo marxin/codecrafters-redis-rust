@@ -1,10 +1,10 @@
-use std::{any, net::SocketAddr};
+use std::net::SocketAddr;
 
 use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt, BufReader},
+    io::{AsyncWriteExt, BufReader},
     net::TcpStream,
 };
-use tracing::{debug, info};
+use tracing::info;
 
 use crate::parser::{self, RedisValue};
 
@@ -70,7 +70,10 @@ impl RedisReplica {
         let RedisValue::File(content) = reply else {
             panic!();
         };
-        info!("got RDB file ({}), starting main loop in replica", content.len());
+        info!(
+            "got RDB file ({}), starting main loop in replica",
+            content.len()
+        );
 
         loop {
             let token_result = parser::parse_token(&mut stream).await.unwrap();

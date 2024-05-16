@@ -1,5 +1,4 @@
 use anyhow::Context;
-use bytes::buf;
 use tokio::{
     io::{AsyncBufReadExt, AsyncReadExt, BufReader},
     net::TcpStream,
@@ -112,7 +111,7 @@ impl RedisValue {
             }
             RedisValue::Array(array) => {
                 let length = array.len();
-                let mut content = array
+                let content = array
                     .iter()
                     .map(|v| v.serialize())
                     .collect::<Vec<_>>()
