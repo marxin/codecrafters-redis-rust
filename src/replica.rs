@@ -71,7 +71,7 @@ impl RedisReplica {
         // TODO: check arguments of FULLRESYNC
 
         let mut buffer = vec![0u8; 32];
-        stream.read_exact(& mut buffer);
+        stream.read_exact(& mut buffer).await?;
         info!("read {buffer:?}");
 
         Ok(())
