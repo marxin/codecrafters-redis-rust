@@ -78,22 +78,27 @@ impl RedisReplica {
             Self::start_server(storage, addr).await.unwrap();
         });
 
+        let mut replicated_bytes = 0;
         loop {
-            let token_result = parser::parse_token(&mut stream).await.unwrap();
-            let command = RedisRequest::try_from(token_result.0)?;
+            let (token, token_size) = parser::parse_token(&mut stream).await.unwrap();
+            let command = RedisRequest::try_from(token)?;
             info!("parsed command: {command:?}");
             match command {
                 RedisRequest::Null => break,
                 RedisRequest::Set { key, value, .. } => {
                     self.storage.lock().unwrap().insert(key, value);
+                    replicated_bytes += token_size;
                 }
                 RedisRequest::Del { key } => {
                     self.storage.lock().unwrap().remove(&key);
+                    replicated_bytes += token_size;
                 }
                 RedisRequest::ReplConf { arg, value } => {
                     anyhow::ensure!(arg == "GETACK" && value == "*");
-                    let reply: RedisValue = ["REPLCONF", "ACK", "0"][..].into();
+                    let reply: RedisValue =
+                        ["REPLCONF", "ACK", &replicated_bytes.to_string()][..].into();
                     stream.write_all(&reply.serialize()).await?;
+                    replicated_bytes += token_size;
                 }
                 _ => todo!(),
             }
