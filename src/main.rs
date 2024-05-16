@@ -19,8 +19,8 @@ struct Args {
     #[arg(long, default_value_t = 6379)]
     port: u16,
     /// Replica of a master instance
-    #[arg(long, num_args(2))]
-    replicaof: Option<Vec<String>>,
+    #[arg(long)]
+    replicaof: Option<String>,
 }
 
 #[tokio::main]
@@ -31,7 +31,7 @@ async fn main() -> anyhow::Result<()> {
     let addr = SocketAddr::from((Ipv4Addr::LOCALHOST, args.port));
 
     if let Some(replica) = args.replicaof {
-        let replica = RedisReplica::new(SocketAddr::from_str(&replica.join(":"))?);
+        let replica = RedisReplica::new(SocketAddr::from_str(&replica.replace(' ', ":"))?);
         replica.start_server(addr).await
     } else {
         let server = Arc::new(RedisServer::new());
