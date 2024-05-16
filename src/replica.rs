@@ -134,6 +134,7 @@ impl RedisReplica {
                     || RedisResponse::Null,
                     |value| RedisResponse::String(value.clone()),
                 ),
+                RedisRequest::Info => RedisResponse::String("role:slave\n".to_string()),
                 _ => todo!("unsupported command: {command:?}"),
             };
 
