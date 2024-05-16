@@ -1,23 +1,37 @@
-use std::net::SocketAddr;
+use std::{
+    collections::HashMap,
+    net::SocketAddr,
+    sync::{Arc, Mutex},
+};
 
 use tokio::{
     io::{AsyncWriteExt, BufReader},
-    net::TcpStream,
+    net::{TcpListener, TcpStream},
 };
-use tracing::info;
+use tracing::{debug, info, info_span, Instrument};
 
-use crate::parser::{self, RedisValue};
+use crate::{
+    command::{RedisRequest, RedisResponse},
+    parser::{self, RedisValue},
+};
+
+type Storage = Arc<Mutex<HashMap<String, String>>>;
 
 pub struct RedisReplica {
+    storage: Storage,
+
     replicaof: SocketAddr,
 }
 
 impl RedisReplica {
     pub fn new(replicaof: SocketAddr) -> Self {
-        Self { replicaof }
+        Self {
+            storage: Storage::default(),
+            replicaof,
+        }
     }
 
-    pub async fn start_server(&self, addr: SocketAddr) -> anyhow::Result<()> {
+    pub async fn start_replication(&self, addr: SocketAddr) -> anyhow::Result<()> {
         info!("Replicating: {}, listening on: {}", self.replicaof, addr);
         let mut stream = BufReader::new(TcpStream::connect(self.replicaof).await?);
 
@@ -75,6 +89,11 @@ impl RedisReplica {
             content.len()
         );
 
+        let storage = self.storage.clone();
+        tokio::spawn(async move {
+            Self::start_server(storage, addr).await;
+        });
+
         loop {
             let token_result = parser::parse_token(&mut stream).await.unwrap();
             info!("parsed command: {token_result:?}");
@@ -87,5 +106,44 @@ impl RedisReplica {
         }
 
         Ok(())
+    }
+
+    async fn handle_connection(stream: TcpStream) -> anyhow::Result<()> {
+        let mut stream = BufReader::new(stream);
+
+        loop {
+            let query = parser::parse_token(&mut stream).await.unwrap();
+            debug!("parsed request: {query:?}");
+            let command = RedisRequest::try_from(query.0)?;
+
+            let reply = match command {
+                RedisRequest::Null => {
+                    break;
+                }
+                RedisRequest::Ping => RedisResponse::String("PONG".to_string()),
+                _ => todo!("unsupported request: {command:?}"),
+            };
+
+            stream.write_all(&reply.serialize()).await?;
+        }
+
+        Ok(())
+    }
+
+    async fn start_server(storage: Storage, addr: SocketAddr) -> anyhow::Result<()> {
+        let listener = TcpListener::bind(addr).await?;
+        info!("Listening on: {}", addr);
+
+        loop {
+            let (stream, addr) = listener.accept().await?;
+            let storage = storage.clone();
+            tokio::spawn(
+                async move {
+                    // TODO
+                    Self::handle_connection(stream).await;
+                }
+                .instrument(info_span!("connection", addr = %addr)),
+            );
+        }
     }
 }

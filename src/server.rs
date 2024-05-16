@@ -2,7 +2,7 @@ use std::{
     collections::HashMap,
     net::{SocketAddr, SocketAddrV4},
     ops::Add,
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex}, thread::sleep, time::Duration,
 };
 
 use tokio::{
@@ -85,6 +85,9 @@ impl ReplicationMonitor {
         stream
             .write_all(&RedisValue::File(hex::decode(EMPTY_RDB)?).serialize())
             .await?;
+
+        // process replication channel here
+        sleep(Duration::from_secs(100));
 
         Ok(())
     }

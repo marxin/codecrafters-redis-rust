@@ -38,7 +38,7 @@ async fn main() -> anyhow::Result<()> {
                 "could not parse --replicaof address: {replica}"
             ))?;
         let replica = RedisReplica::new(replica_addr);
-        replica.start_server(addr).await
+        replica.start_replication(addr).await
     } else {
         let server = Arc::new(RedisServer::new());
         RedisServer::start_server(server, addr).await
