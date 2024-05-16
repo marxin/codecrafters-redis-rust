@@ -95,12 +95,12 @@ impl ReplicationMonitor {
         while let Ok(command) = self.broadcast_tx.subscribe().recv().await {
             match command {
                 RedisRequest::Set { .. } | RedisRequest::Del { .. } => {
+                    info!("sending replication: {command:?}");
                     stream.write_all(&command.to_value().serialize()).await?;
                 }
                 RedisRequest::ReplConf { .. } => {
                     stream.write_all(&command.to_value().serialize()).await?;
                     let reply = parser::parse_token(&mut stream).await.unwrap().0;
-                    info!("reply received: {reply:?}");
                     let command = RedisRequest::try_from(reply)?;
                     info!("replconf reply received: {command:?}");
                     let RedisRequest::ReplConf { value, .. } = command else {
