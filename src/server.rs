@@ -15,7 +15,7 @@ use tokio::{
     task::JoinSet,
     time::Instant,
 };
-use tracing::{debug, error, info, info_span, Instrument};
+use tracing::{debug, error, info, info_span, warn, Instrument};
 
 use crate::{
     command::{RedisRequest, RedisResponse},
@@ -103,7 +103,8 @@ impl ReplicationMonitor {
                     let command = RedisRequest::try_from(reply)?;
                     info!("replconf reply received: {command:?}");
                     let RedisRequest::ReplConf { value, .. } = command else {
-                        anyhow::bail!("replconf expected");
+                        warn!("replconf expect a valid reply");
+                        break;
                     };
                     let replicated_counter = value.parse::<u64>()?;
                     let mut latest_repl_id = self.latest_repl_id.lock().unwrap();
